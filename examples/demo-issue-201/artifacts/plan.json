@@ -1,0 +1,28 @@
+{
+  "issue": 201,
+  "summary": "Lock the invoice row (SELECT … FOR UPDATE) before the status check in finalize().",
+  "files_to_touch": [
+    "backend/app/service/invoice.py"
+  ],
+  "tests_to_add": [
+    "backend/tests/test_finalize_race.py"
+  ],
+  "landing_order": [
+    "test",
+    "service"
+  ],
+  "risk_class": [
+    "money",
+    "concurrency"
+  ],
+  "citations": [
+    {
+      "url": "https://docs.sqlalchemy.org/en/20/orm/queryguide/query.html#sqlalchemy.orm.Query.with_for_update",
+      "claim": "with_for_update() emits SELECT … FOR UPDATE, serialising finalizers"
+    }
+  ],
+  "acceptance": [
+    "new test fails on base",
+    "8-thread race yields exactly one voucher"
+  ]
+}

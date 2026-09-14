@@ -1,0 +1,9 @@
+{
+  "issue": 201,
+  "image_uuid": "img-0003",
+  "tool_turns": 7,
+  "tests_added": [
+    "backend/tests/test_finalize_race.py"
+  ],
+  "cost_usd": 0.8
+}
