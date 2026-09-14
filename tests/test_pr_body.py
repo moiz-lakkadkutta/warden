@@ -35,3 +35,24 @@ def test_evidence_table_has_required_rows() -> None:
         "https://d",
     ):
         assert needle in body
+
+
+def test_labels_for_is_the_single_label_decision() -> None:
+    from warden.integrate.pr import PENDING_LABEL, labels_for
+
+    def plan(risk: list[str]) -> Plan:
+        return Plan(
+            issue=1,
+            summary="s",
+            files_to_touch=[],
+            tests_to_add=[],
+            landing_order=[],
+            risk_class=risk,  # type: ignore[arg-type]
+            citations=[],
+            acceptance=[],
+        )
+
+    assert labels_for(plan(["money"])) == [PENDING_LABEL]
+    assert labels_for(plan(["tax", "concurrency"])) == [PENDING_LABEL]
+    assert labels_for(plan(["concurrency"])) == []
+    assert labels_for(plan([])) == []
