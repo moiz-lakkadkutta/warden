@@ -40,6 +40,8 @@ class LLM:
         self._s = settings
         self._meter = meter
         self._log = log
+        if meter.log is None:
+            meter.log = log  # cap hits land in events.jsonl as `cost_cap`
         self._client: OpenAI | None = None
 
     @property
