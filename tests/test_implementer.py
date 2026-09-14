@@ -232,7 +232,7 @@ def test_budget_mid_turn(log: EventLog) -> None:
     assert llm.last_messages is not None
     tool_msgs = [m for m in llm.last_messages if m["role"] == "tool"]
     assert len(tool_msgs) == 3
-    assert tool_msgs[0]["content"].startswith("REF")
+    assert tool_msgs[0]["content"] == "./REF\n" == tool_msgs[1]["content"]
     assert "budget exhausted" in tool_msgs[2]["content"]
     assert tool_msgs[2]["tool_call_id"] == llm.last_messages[2]["tool_calls"][2]["id"]
     assert _note(log, "budget")["tool_turns"] == 2

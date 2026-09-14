@@ -70,6 +70,21 @@ class Candidate(BaseModel):
     cost_usd: float
 
 
+class FixReport(BaseModel):
+    """Payload of the implementer's `finish` pseudo-tool: how the fix loop stopped."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    done: bool = Field(description="true when every acceptance item passes; false when blocked")
+    tests_added: list[str] = Field(
+        default_factory=list, description="Test files written or extended, relative to /app."
+    )
+    unmet: list[str] = Field(
+        default_factory=list, description="Acceptance items that still fail, quoted verbatim."
+    )
+    notes: str = Field("", description="One short paragraph on what was changed and why.")
+
+
 class RaceResult(BaseModel):
     threads: int
     effects_on_base: int | None = None

@@ -63,7 +63,7 @@ _FIND = "find {path} -type f -not -path '*/.git/*' -not -path '*/__pycache__/*' 
 _GREP = "grep -rnI --exclude-dir=.git -e {pattern} -- {path}"
 
 
-def _strict_schema(schema: dict[str, Any]) -> dict[str, Any]:
+def strict_schema(schema: dict[str, Any]) -> dict[str, Any]:
     """Strict-shaped parameters: every property required, no extras, no title/default noise."""
     props = {
         name: {k: v for k, v in prop.items() if k not in ("title", "default")}
@@ -77,13 +77,16 @@ def _strict_schema(schema: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+_strict_schema = strict_schema  # backwards-compatible alias
+
+
 TOOL_SCHEMAS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
             "name": name,
             "description": _DESCRIPTIONS[name],
-            "parameters": _strict_schema(_ARGS[name].model_json_schema()),
+            "parameters": strict_schema(_ARGS[name].model_json_schema()),
         },
     }
     for name in TOOL_NAMES
