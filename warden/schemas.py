@@ -9,13 +9,14 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 Axis = Literal["race", "idor", "money", "malformed", "flow"]
 Severity = Literal["P0", "P1", "P2", "P3"]
 RiskClass = Literal["money", "tax", "schema", "security", "concurrency", "none"]
 Decision = Literal["PASS", "PASS_WITH_CONCERNS", "FAIL"]
 Phase = Literal["hunt", "plan", "fix", "verify", "pr"]
+ToolName = Literal["list_files", "read_file", "grep", "write_file", "run_shell"]
 
 HUMAN_GATE: frozenset[str] = frozenset({"money", "tax", "schema", "security"})
 
@@ -105,3 +106,38 @@ class RunEvent(BaseModel):
     data: dict[str, Any] = Field(default_factory=dict)
     ms: int | None = None
     usd: float | None = None
+
+
+class ToolArgs(BaseModel):
+    """Base for tool-call arguments: unknown keys are a model mistake, not silently dropped."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ListFilesArgs(ToolArgs):
+    path: str = Field(
+        ".", description="Directory to list, relative to /app (default: the repo root)."
+    )
+
+
+class ReadFileArgs(ToolArgs):
+    path: str = Field(description="File to read, relative to /app unless it starts with '/'.")
+
+
+class GrepArgs(ToolArgs):
+    pattern: str = Field(description="Text pattern to search for (grep -e syntax).")
+    path: str = Field(".", description="Directory or file to search, relative to /app.")
+
+
+class WriteFileArgs(ToolArgs):
+    path: str = Field(description="File to create or replace, relative to /app.")
+    content: str = Field(description="The complete new contents of the file.")
+
+
+class RunShellArgs(ToolArgs):
+    command: str = Field(
+        description="Shell command to run in /app, e.g. 'pytest -q tests/test_x.py'."
+    )
+    timeout: int = Field(
+        600, ge=1, le=600, description="Seconds before the command is killed (1-600, default 600)."
+    )
