@@ -1,5 +1,7 @@
-from warden.integrate.pr import evidence_table
-from warden.schemas import Citation, Plan, RaceResult, Verdict
+from collections.abc import Callable
+
+from warden.integrate.pr import PENDING_LABEL, evidence_table, labels_for
+from warden.schemas import Citation, Plan, RaceResult, RiskClass, Verdict
 
 
 def test_evidence_table_has_required_rows() -> None:
@@ -35,3 +37,12 @@ def test_evidence_table_has_required_rows() -> None:
         "https://d",
     ):
         assert needle in body
+
+
+def test_labels_for_is_the_single_label_decision(
+    make_plan: Callable[[list[RiskClass]], Plan],
+) -> None:
+    assert labels_for(make_plan(["money"])) == [PENDING_LABEL]
+    assert labels_for(make_plan(["tax", "concurrency"])) == [PENDING_LABEL]
+    assert labels_for(make_plan(["concurrency"])) == []
+    assert labels_for(make_plan([])) == []
