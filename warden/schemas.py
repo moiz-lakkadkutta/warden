@@ -121,16 +121,18 @@ class ListFilesArgs(ToolArgs):
 
 
 class ReadFileArgs(ToolArgs):
-    path: str = Field(description="File to read, relative to /app unless it starts with '/'.")
+    path: str = Field(
+        min_length=1, description="File to read, relative to /app unless it starts with '/'."
+    )
 
 
 class GrepArgs(ToolArgs):
-    pattern: str = Field(description="Text pattern to search for (grep -e syntax).")
+    pattern: str = Field(min_length=1, description="Text pattern to search for (grep -e syntax).")
     path: str = Field(".", description="Directory or file to search, relative to /app.")
 
 
 class WriteFileArgs(ToolArgs):
-    path: str = Field(description="File to create or replace, relative to /app.")
+    path: str = Field(min_length=1, description="File to create or replace, relative to /app.")
     content: str = Field(description="The complete new contents of the file.")
 
 

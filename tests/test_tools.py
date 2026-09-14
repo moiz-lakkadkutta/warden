@@ -1,4 +1,5 @@
 import inspect
+import json
 import sys
 from collections.abc import Iterator
 from pathlib import Path
@@ -275,6 +276,84 @@ def test_shell_args_are_quoted(log: EventLog) -> None:
     assert "'src/my file.py'" in backend.calls[-1]
     hit = d.dispatch(box, "grep", {"pattern": "hello world", "path": "src"})
     assert hit.ok and hit.output == "src/my file.py:1:hello world\n"
+
+
+def test_invalid_write_file_never_logs_content(log: EventLog) -> None:
+    _, box, _ = _setup(log)
+    secret = "SECRETSECRETSECRET" * 600  # ~10 KB
+    res = ToolDispatcher(log).dispatch(
+        box, "write_file", {"path": "a.py", "content": secret, "extra": 1}
+    )
+    assert res.ok is False and res.exit_code is None
+    log.close()
+    lines = (log.dir / "events.jsonl").read_text(encoding="utf-8").splitlines()
+    tool_lines = [ln for ln in lines if json.loads(ln)["kind"] == "tool"]
+    assert len(tool_lines) == 1
+    assert "SECRET" not in tool_lines[0]
+    assert len(tool_lines[0]) < 1024
+    args = json.loads(tool_lines[0])["data"]["args"]
+    assert "content" not in args
+    assert args["bytes"] == len(secret) and args["path"] == "a.py" and args["extra"] == 1
+
+
+def test_scrub_args_shapes() -> None:
+    long = "x" * 500
+    scrubbed = tools_module.scrub_args({"command": long, "n": 3, "obj": [long], "content": 42})
+    assert len(scrubbed["command"]) == 200
+    assert scrubbed["n"] == 3
+    assert len(scrubbed["obj"]) <= 200
+    assert scrubbed["bytes"] == 2 and "content" not in scrubbed
+    assert tools_module.scrub_args(long) == {"raw": repr(long)[:200]}
+    assert tools_module.scrub_args(None) == {"raw": "None"}
+
+
+def test_unknown_tool_event_scrubs_raw_args(log: EventLog) -> None:
+    _, box, _ = _setup(log)
+    ToolDispatcher(log).dispatch(box, "nope", {"content": "hidden", "path": "p"})
+    ToolDispatcher(log).dispatch(box, "nope", "not a dict")
+    tool = [e for e in _events(log) if e.kind == "tool"]
+    assert tool[0].data["args"] == {"bytes": 6, "path": "p"}
+    assert tool[1].data["args"] == {"raw": "'not a dict'"}
+
+
+def test_run_shell_pipe_inside_quotes(log: EventLog) -> None:
+    _, box, _ = _setup(log)
+    res = ToolDispatcher(log).dispatch(box, "run_shell", {"command": 'echo "a|b"'})
+    assert res.ok and res.exit_code == 0
+    assert res.output.startswith("a|b")
+
+
+def test_run_shell_unparseable_does_not_raise(log: EventLog) -> None:
+    _, box, _ = _setup(log)
+    res = ToolDispatcher(log).dispatch(box, "run_shell", {"command": 'echo "unterminated'})
+    assert res.ok is False and res.exit_code == 127
+    assert "cannot parse shell" in res.output
+    assert res.output.endswith("[exit 127]")
+
+
+def test_run_shell_or_is_not_a_pipe(log: EventLog) -> None:
+    _, box, _ = _setup(log)
+    res = ToolDispatcher(log).dispatch(box, "run_shell", {"command": "false || true"})
+    assert res.ok is False and res.exit_code == 127
+
+
+def test_write_file_empty_path(log: EventLog) -> None:
+    _, box, _ = _setup(log)
+    res = ToolDispatcher(log).dispatch(box, "write_file", {"path": "", "content": "x"})
+    assert res.ok is False and res.exit_code is None
+    assert res.output.startswith("invalid arguments for write_file")
+    assert "path" in res.output
+    assert res.box is box
+
+
+@pytest.mark.parametrize(
+    ("name", "args"),
+    [("read_file", {"path": ""}), ("grep", {"pattern": "", "path": "src"})],
+)
+def test_empty_required_strings_rejected(log: EventLog, name: str, args: Any) -> None:
+    _, box, _ = _setup(log)
+    res = ToolDispatcher(log).dispatch(box, name, args)
+    assert res.ok is False and res.exit_code is None
 
 
 def test_no_contree_import() -> None:

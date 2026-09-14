@@ -71,8 +71,15 @@ class FakeBackend:
         return stdout, stderr, code, (child if keep else None), child.uuid
 
     def _interpret(self, img: FakeImage, shell: str, cwd: str) -> tuple[str, str, int]:
-        # `|`-tails are no-ops (e.g. `find … | sort`): the first segment is interpreted.
-        parts = shlex.split(shell.split("|", 1)[0]) if shell else []
+        try:
+            parts = shlex.split(shell) if shell else []
+        except ValueError:
+            return "", "fake backend: cannot parse shell", 127
+        # `|`-tails are no-ops (e.g. `find … | sort`): tokens from the first bare `|` are dropped.
+        if "||" in parts:
+            return "", "fake backend: unknown command ||", 127
+        if "|" in parts:
+            parts = parts[: parts.index("|")]
         if not parts or parts[0] == "true":
             return "", "", 0
         if parts[0] == "false":

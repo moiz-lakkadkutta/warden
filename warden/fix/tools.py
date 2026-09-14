@@ -125,6 +125,28 @@ def _format_errors(name: str, err: ValidationError) -> str:
     return "\n".join(lines)
 
 
+_ARG_MAX = 200
+
+
+def scrub_args(args: Any) -> dict[str, Any]:
+    """Event-safe view of tool args, by key, valid or not: `content` becomes `bytes`, every string
+    is cut to 200 chars, anything else is a truncated repr; a non-dict is `{"raw": ...}`."""
+    if not isinstance(args, dict):
+        return {"raw": repr(args)[:_ARG_MAX]}
+    out: dict[str, Any] = {}
+    for key, value in args.items():
+        k = str(key)[:_ARG_MAX]
+        if k == "content":
+            out["bytes"] = len(value.encode()) if isinstance(value, str) else len(repr(value))
+        elif isinstance(value, str):
+            out[k] = value[:_ARG_MAX]
+        elif value is None or isinstance(value, bool | int | float):
+            out[k] = value
+        else:
+            out[k] = repr(value)[:_ARG_MAX]
+    return out
+
+
 def _ms(t0: float) -> int:
     return int((time.perf_counter() - t0) * 1000)
 
@@ -154,7 +176,7 @@ class ToolDispatcher:
         self.calls += 1
         t0 = time.perf_counter()
         error: str | None = None
-        scrubbed: Any = args
+        scrubbed = scrub_args(args)  # raw args on every failure path: never log file content
         if name not in _ARGS:
             error = f"unknown tool {name}; available: {', '.join(TOOL_NAMES)}"
             result = ToolResult(name, False, error, None, box, _ms(t0), False)
@@ -165,7 +187,7 @@ class ToolDispatcher:
                 error = _format_errors(name, err)
                 result = ToolResult(name, False, error, None, box, _ms(t0), False)
             else:
-                scrubbed = self._scrub(parsed)
+                scrubbed = scrub_args(parsed.model_dump())
                 result = self._execute(box, name, parsed, t0)
         data: dict[str, Any] = {
             "name": name,
@@ -180,14 +202,6 @@ class ToolDispatcher:
             data["error"] = error
         self._log.emit(self._phase, "tool", data, ms=result.ms)
         return result
-
-    @staticmethod
-    def _scrub(parsed: ToolArgs) -> dict[str, Any]:
-        if isinstance(parsed, WriteFileArgs):
-            return {"path": parsed.path, "bytes": len(parsed.content.encode())}
-        if isinstance(parsed, RunShellArgs):
-            return {"command": parsed.command[:200], "timeout": parsed.timeout}
-        return parsed.model_dump()
 
     def _finish(
         self, box: Box, name: str, ok: bool, output: str, exit_code: int, t0: float
