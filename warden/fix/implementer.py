@@ -249,7 +249,8 @@ def run_implementer(
             )
             cost += _charge(routed, hooks)
             calls = routed.tool_calls
-            note("routed", tool_calls=[c["name"] for c in calls])
+            if calls:
+                note("routed", tool_calls=[c["name"] for c in calls])
         messages.append(assistant_message(res.content, calls))
         if not calls:
             turns += 1
@@ -258,16 +259,16 @@ def run_implementer(
             continue
         for call in calls:
             cid, name, args = call["id"], call["name"], call["arguments"]
-            if turns >= max_tool_turns:
-                messages.append(_tool_message(cid, BUDGET_MSG))
-                continue
-            if name == "finish":
+            if name == "finish":  # free: never dispatched, honoured even once the budget is spent
                 parsed = parse_finish(args)
                 if isinstance(parsed, FixReport):
                     report = parsed
                     break
                 turns += 1
                 messages.append(_tool_message(cid, parsed))
+                continue
+            if turns >= max_tool_turns:
+                messages.append(_tool_message(cid, BUDGET_MSG))
                 continue
             is_test_write = (
                 name == "write_file"
@@ -291,8 +292,9 @@ def run_implementer(
                     )
                     note("refused_write", path=path, removed=removed)
                     continue
-                if path not in on_base:
-                    on_base[path] = _cat(base, path).ok
+                key = _norm(path)
+                if key not in on_base:
+                    on_base[key] = _cat(base, path).ok
             result = dispatch.dispatch(box, name, args)
             box = result.box
             turns += 1
@@ -301,8 +303,9 @@ def run_implementer(
             if name == "write_file" and result.ok:
                 path = str(args["path"])
                 first_write = path if first_write is None else first_write
-                if is_test_write and not on_base.get(path, True) and path not in tests_added:
-                    tests_added.append(path)
+                key = _norm(path)
+                if is_test_write and not on_base.get(key, True) and key not in tests_added:
+                    tests_added.append(key)
 
     if report is None:
         note("budget", tool_turns=turns)

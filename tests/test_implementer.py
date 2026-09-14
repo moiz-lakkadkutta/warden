@@ -239,6 +239,22 @@ def test_budget_mid_turn(log: EventLog) -> None:
     assert _note(log, "budget")["tool_turns"] == 2
 
 
+def test_finish_after_budget_mid_turn_is_honoured(log: EventLog) -> None:
+    env = _setup(log)
+    script = [
+        turn(
+            tool_call("write_file", path=T, content=TEST_A),
+            finish_turn(done=True, tests_added=[T]).tool_calls[0],
+        )
+    ]
+    _, cand = _run(env, script, max_tool_turns=1)
+    assert isinstance(cand, Candidate)
+    assert cand.tool_turns == 1 and env.dispatcher.calls == 1
+    assert cand.tests_added == [T] and cand.image_uuid != env.base.uuid
+    assert _note(log, "done")["report"]["done"] is True
+    assert not [n for n in _notes(log) if n["implementer"] == "budget"]
+
+
 # ------------------------------------------------------------------ 5. cost cap
 
 
@@ -303,6 +319,20 @@ def test_existing_test_file_edit_allowed(log: EventLog) -> None:
     assert not [n for n in _notes(log) if n["implementer"] == "final_tests"]
 
 
+def test_tests_added_normalised(log: EventLog) -> None:
+    env = _setup(log)
+    script = [
+        turn(tool_call("write_file", path=T, content=TEST_A)),
+        turn(tool_call("write_file", path=f"./{T}", content=TEST_A + "\n")),
+        finish_turn(),
+    ]
+    _, cand = _run(env, script)
+    assert env.dispatcher.calls == 2
+    assert cand.tests_added == [T]
+    assert _note(log, "final_tests")["tests"] == [T]
+    assert len([c for c in env.backend.calls if c.startswith("pytest")]) == 1
+
+
 # ------------------------------------------------------------------ 7. prose routing
 
 
@@ -335,6 +365,7 @@ def test_unroutable_prose_nudges(log: EventLog) -> None:
     assert msgs[2] == {"role": "assistant", "content": "I think the bug is in fix()"}
     assert msgs[3]["role"] == "user" and "tool call" in msgs[3]["content"]
     assert _note(log, "unroutable")
+    assert not [n for n in _notes(log) if n["implementer"] == "routed"]
     assert cand.cost_usd == pytest.approx(3 * usd_for("", 1000, 100))
 
 
