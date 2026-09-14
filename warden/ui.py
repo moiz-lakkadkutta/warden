@@ -1,6 +1,6 @@
 """Terminal output policy: colour, the error block and the streaming phase log.
 
-stdlib only — `warden --help` imports this module, so it must stay cheap and offline.
+stdlib + typer.Exit only; nothing heavier — this module is on the `warden --help` path.
 Everything here writes to stderr; stdout is data (see docs/ux-brief.md §2.3).
 
 Colour precedence (first match wins):

@@ -163,6 +163,8 @@ def init(
         fail(f"{cfg} exists", fix="re-run with --yes to overwrite")
     if not (repo / ".git").exists():
         _err(f"warning: {repo} has no .git — Warden opens PRs from a git checkout")
+    if runner == "unknown":
+        _err("could not detect a test runner; set test_cmd in warden.toml")
     cfg.write_text(
         "\n".join(
             [
@@ -196,7 +198,7 @@ def _detect_test_cmd(repo: Path, app_dir: str) -> tuple[str, str]:
             return "go", "go test ./..."
         if (root / "Cargo.toml").exists():
             return "cargo", "cargo test"
-    return "unknown", "unknown -q"
+    return "unknown", ""
 
 
 # ------------------------------------------------------------------------------- run

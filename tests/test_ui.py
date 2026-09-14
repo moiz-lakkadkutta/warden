@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import ast
 import io
+import sys
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 import typer
@@ -163,3 +166,19 @@ def test_fail_debug_reraises(capsys: pytest.CaptureFixture[str]) -> None:
     ui.configure(ui.UIConfig(color=False, animate=False, debug=False))
     with pytest.raises(typer.Exit):
         ui.fail("boom", exc=exc)
+
+
+# ------------------------------------------------------------------ import contract
+def test_ui_imports_only_stdlib_and_typer() -> None:
+    """ui.py sits on the `warden --help` path: stdlib + typer only, nothing heavier."""
+    tree = ast.parse(Path(ui.__file__).read_text(encoding="utf-8"))
+    names: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, ast.Import):
+            names.update(alias.name.split(".")[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            assert node.module is not None and node.level == 0
+            names.add(node.module.split(".")[0])
+    allowed = set(sys.stdlib_module_names) | {"typer"}
+    assert names <= allowed, names - allowed
+    assert "typer" in names  # typer.Exit is the one sanctioned non-stdlib import

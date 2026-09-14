@@ -79,6 +79,7 @@ def test_demo_phase_log_on_stderr() -> None:
     assert idx == sorted(idx)
     total = lines[idx[-1]]
     assert "$1.42  PASS" in total
+    assert lines[idx[1]].endswith("reading issue #201, 1 citation")  # singular for the fixture
 
 
 def test_demo_json_stdout_is_jsonl() -> None:
@@ -162,6 +163,12 @@ def test_init_detects_runner_and_never_prompts(tmp_path: Path) -> None:
     (tmp_path / ".git").mkdir()
     res = _invoke("init", str(tmp_path), "--yes")
     assert res.exit_code == 0 and ".git" not in res.stderr
+
+    (tmp_path / "package.json").unlink()
+    res = _invoke("init", str(tmp_path), "--yes")
+    assert res.exit_code == 0, res.stderr
+    assert 'test_cmd = ""' in (tmp_path / "warden.toml").read_text()
+    assert "could not detect a test runner; set test_cmd in warden.toml" in res.stderr
 
 
 def test_cost_cap_exits_4(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -56,7 +56,8 @@ def run_demo(
         ],
         acceptance=["new test fails on base", "8-thread race yields exactly one voucher"],
     )
-    prog.phase("plan", f"reading issue #{DEMO_ISSUE}, {len(plan.citations)} citation")
+    n = len(plan.citations)
+    prog.phase("plan", f"reading issue #{DEMO_ISSUE}, {n} citation{'' if n == 1 else 's'}")
     log.emit("plan", "note", {"text": plan.summary, "citations": [c.url for c in plan.citations]})
     prog.cost(0.31)
     if dry_run:
