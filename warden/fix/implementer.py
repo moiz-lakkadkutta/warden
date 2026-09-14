@@ -3,9 +3,10 @@
 Super (`Role.IMPLEMENTER`) drives the five TOOLS schemas plus a `finish` pseudo-tool directly; a
 prose-only turn is routed once through Lightning (`Role.TOOLS`) into tool calls and spliced into
 Super's history as if Super had made them. Every sandbox effect goes through `ToolDispatcher` over
-`Box`, and `ToolResult.box` threads the checkpoint from call to call. Nothing is caught here:
-`CostCapExceededError` and backend errors propagate to the caller. Progress goes through the local
-`Progress` protocol (ui.PhaseLog satisfies it) so this module never imports the UI.
+`Box`, and `ToolResult.box` threads the checkpoint from call to call. The only handler in this
+module is for pydantic's ValidationError on the `finish` arguments; `CostCapExceededError` and
+backend errors propagate to the caller. Progress goes through the local `Progress` protocol
+(ui.PhaseLog satisfies it) so this module never imports the UI.
 """
 
 from __future__ import annotations
@@ -17,7 +18,6 @@ import re
 import shlex
 from fnmatch import fnmatch
 from pathlib import Path
-from types import TracebackType
 from typing import Any, Protocol, runtime_checkable
 
 from pydantic import ValidationError
@@ -81,27 +81,6 @@ class _NoProgress:
 
     def cost(self, usd: float) -> None:
         return None
-
-
-class _Invalid:
-    """Keeps a pydantic `ValidationError` raised inside the block instead of propagating it.
-
-    Used only around `FixReport.model_validate` on the model's `finish` arguments: a pure,
-    in-memory check, so nothing from the LLM or the sandbox can ever be swallowed here.
-    """
-
-    err: ValidationError | None = None
-
-    def __enter__(self) -> _Invalid:
-        return self
-
-    def __exit__(
-        self, et: type[BaseException] | None, ev: BaseException | None, tb: TracebackType | None
-    ) -> bool:
-        if isinstance(ev, ValidationError):
-            self.err = ev
-            return True
-        return False
 
 
 # --------------------------------------------------------------------------- helpers
@@ -186,11 +165,14 @@ def _tool_message(tool_call_id: str, content: str) -> dict[str, Any]:
 
 def parse_finish(args: Any) -> FixReport | str:
     """The validated report, or the error text fed back to the model (no URLs)."""
-    with _Invalid() as invalid:
+    # The only handler in this module: a pure in-memory check of the model's arguments.
+    # CostCapExceededError and sandbox/backend errors are never caught here.
+    try:
         return FixReport.model_validate(args)
-    assert invalid.err is not None
+    except ValidationError as err:
+        errors = err.errors(include_url=False)
     lines = ["invalid arguments for finish:"]
-    for e in invalid.err.errors(include_url=False):
+    for e in errors:
         loc = ".".join(str(p) for p in e["loc"]) or "<args>"
         lines.append(f"  {loc}: {e['msg']}")
     return "\n".join(lines)

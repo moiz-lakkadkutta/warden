@@ -1,6 +1,7 @@
 import hashlib
 import inspect
 import json
+import re
 import sys
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
@@ -253,7 +254,10 @@ def test_cost_cap_propagates(log: EventLog) -> None:
     assert env.dispatcher.calls == 2
     names = {n["implementer"] for n in _notes(log)}
     assert names == {"start"}
-    assert "except" not in inspect.getsource(impl_module)
+    src = inspect.getsource(impl_module)
+    clauses = re.findall(r"except\s+([\w.]+)", src)
+    assert clauses == ["ValidationError"]
+    assert not [ln for ln in src.splitlines() if "except" in ln and "CostCapExceededError" in ln]
 
 
 # ------------------------------------------------------------------ 6. never delete a test
