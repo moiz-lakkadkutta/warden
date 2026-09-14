@@ -18,6 +18,8 @@ from warden.runlog.events import EventLog
 from warden.sandbox.box import Box, RunResult
 
 _SUMMARY = re.compile(r"(\d+) (passed|failed|errors?|skipped|xfailed|xpassed)")
+# pytest's final line: "===== 1 failed, 4 passed in 0.10s =====" or (-q) "5 passed in 0.10s"
+_SUMMARY_LINE = re.compile(r"^=+ .* =+$|\bin \d+\.\d+s\b")
 _TAIL = 2000
 
 
@@ -90,10 +92,22 @@ class GateResult:
         }
 
 
+def summary_line(stdout: str) -> str:
+    """The last line shaped like a pytest summary; "" when there is none."""
+    for line in reversed(stdout.splitlines()):
+        if _SUMMARY_LINE.search(line.strip()):
+            return line
+    return ""
+
+
 def parse_suite(stdout: str) -> dict[str, int]:
-    """pytest summary line -> counts. `{}` when nothing matched (collection crash / timeout)."""
+    """pytest summary line -> counts. `{}` when nothing matched (collection crash / timeout).
+
+    Only the summary line is parsed: assertion messages or captured prints elsewhere in stdout
+    that happen to contain "N passed" must not inflate the counts.
+    """
     counts: dict[str, int] = {}
-    for n, key in _SUMMARY.findall(stdout):
+    for n, key in _SUMMARY.findall(summary_line(stdout)):
         norm = "errors" if key == "error" else key
         counts[norm] = counts.get(norm, 0) + int(n)
     if counts:

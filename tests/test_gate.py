@@ -1,3 +1,4 @@
+from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
 
@@ -7,16 +8,28 @@ from warden.runlog.events import EventLog
 from warden.sandbox.box import Box
 from warden.sandbox.fake import FakeBackend, FakeImage
 from warden.schemas import Verdict
-from warden.verify.gate import DEFAULT_COMMANDS, GateResult, run_gate
+from warden.verify.gate import DEFAULT_COMMANDS, GateResult, parse_suite, run_gate
 
 VERDICT_KEYS = {"suite", "mypy_ok", "ruff_ok", "alembic_single_head", "openapi_drift"}
 
 
-def _setup(tmp_path: Path) -> tuple[FakeBackend, Box, EventLog, FakeImage]:
-    backend = FakeBackend()
+@pytest.fixture
+def log(tmp_path: Path) -> Iterator[EventLog]:
     log = EventLog(tmp_path / "runs", "t")
+    yield log
+    log.close()
+
+
+def _setup(log: EventLog) -> tuple[FakeBackend, Box, FakeImage]:
+    backend = FakeBackend()
     candidate = Box.from_ref(backend, "warden/fabric-base:latest", log, phase="verify")
-    return backend, candidate, log, backend.images[candidate.uuid]
+    return backend, candidate, backend.images[candidate.uuid]
+
+
+def _sandbox_events(log: EventLog) -> list[dict[str, object]]:
+    log.close()
+    events = EventLog.read(log.dir.parent, log.run_id)
+    return [e.data for e in events if e.kind == "sandbox"]
 
 
 def _assert_green_except(result: GateResult, *flipped: str) -> None:
@@ -33,8 +46,8 @@ def _assert_green_except(result: GateResult, *flipped: str) -> None:
     assert result.ok is (not flipped)
 
 
-def test_all_green(tmp_path: Path) -> None:
-    _, candidate, log, _ = _setup(tmp_path)
+def test_all_green(log: EventLog) -> None:
+    _, candidate, _ = _setup(log)
     result = run_gate(candidate, log)
     assert result.suite == {"passed": 1, "failed": 0}
     _assert_green_except(result)
@@ -45,30 +58,30 @@ def test_all_green(tmp_path: Path) -> None:
     assert verdict.mypy_ok and verdict.suite == {"passed": 1, "failed": 0}
 
 
-def test_suite_failure(tmp_path: Path) -> None:
-    _, candidate, log, img = _setup(tmp_path)
+def test_suite_failure(log: EventLog) -> None:
+    _, candidate, img = _setup(log)
     img.suite_counts = {"passed": 5, "failed": 2}
     result = run_gate(candidate, log)
     assert result.suite == {"passed": 5, "failed": 2}
     _assert_green_except(result, "suite_ok")
 
 
-def test_mypy_flips(tmp_path: Path) -> None:
-    _, candidate, log, img = _setup(tmp_path)
+def test_mypy_flips(log: EventLog) -> None:
+    _, candidate, img = _setup(log)
     img.gate_results["mypy"] = 1
     _assert_green_except(run_gate(candidate, log), "mypy_ok")
 
 
 @pytest.mark.parametrize("key", ["ruff check", "ruff format"])
-def test_ruff_flips(tmp_path: Path, key: str) -> None:
-    _, candidate, log, img = _setup(tmp_path)
+def test_ruff_flips(log: EventLog, key: str) -> None:
+    _, candidate, img = _setup(log)
     img.gate_results[key] = 1
     _assert_green_except(run_gate(candidate, log), "ruff_ok")
 
 
 @pytest.mark.parametrize("seed", ["upgrade_fails", "two_heads"])
-def test_alembic_flips(tmp_path: Path, seed: str) -> None:
-    _, candidate, log, img = _setup(tmp_path)
+def test_alembic_flips(log: EventLog, seed: str) -> None:
+    _, candidate, img = _setup(log)
     if seed == "upgrade_fails":
         img.gate_results["alembic upgrade"] = 1
     else:
@@ -77,19 +90,19 @@ def test_alembic_flips(tmp_path: Path, seed: str) -> None:
 
 
 @pytest.mark.parametrize(("key", "code"), [("make openapi-snapshot", 2), ("git diff", 1)])
-def test_openapi_drift_flips(tmp_path: Path, key: str, code: int) -> None:
-    _, candidate, log, img = _setup(tmp_path)
+def test_openapi_drift_flips(log: EventLog, key: str, code: int) -> None:
+    _, candidate, img = _setup(log)
     img.gate_results[key] = code
     _assert_green_except(run_gate(candidate, log), "openapi_drift")
 
 
-def test_every_gate_command_emits_sandbox_event(tmp_path: Path) -> None:
-    _, candidate, log, img = _setup(tmp_path)
+def test_every_gate_command_emits_sandbox_event(log: EventLog) -> None:
+    _, candidate, img = _setup(log)
     img.gate_results["mypy"] = 1
     img.gate_results["git diff"] = 1
     result = run_gate(candidate, log)
     log.close()
-    events = EventLog.read(tmp_path / "runs", "t")
+    events = EventLog.read(log.dir.parent, log.run_id)
     sandbox = [e for e in events if e.kind == "sandbox"]
     c = DEFAULT_COMMANDS
     expected = [
@@ -115,9 +128,8 @@ def test_every_gate_command_emits_sandbox_event(tmp_path: Path) -> None:
     assert final.ms is not None
 
 
-def test_candidate_untouched_and_steps_recorded(tmp_path: Path) -> None:
-    _, candidate, log, img = _setup(tmp_path)
-    before = dict(img.files)
+def test_candidate_untouched_and_steps_recorded(log: EventLog) -> None:
+    _, candidate, _ = _setup(log)
     commands = replace(DEFAULT_COMMANDS, suite="pytest -q backend/tests")
     result = run_gate(candidate, log, commands=commands)
     assert len(result.steps) == 9
@@ -128,4 +140,22 @@ def test_candidate_untouched_and_steps_recorded(tmp_path: Path) -> None:
     assert all(s.ok for s in result.steps)
     assert all(s.ms >= 0 for s in result.steps)
     assert "passed" in result.steps[0].tail
-    assert img.files == before
+    # fork topology: steps 1-4 and 8 on the candidate; 6-7 on the db child; 9 on the snap child
+    sandbox = _sandbox_events(log)
+    cand = candidate.uuid
+    db, snap = sandbox[4]["to"], sandbox[7]["to"]
+    assert db != cand and snap != cand and db != snap
+    assert [e["from"] for e in sandbox] == [cand] * 4 + [cand, db, db, cand, snap]
+    assert [e["to"] for e in sandbox[:4]] == [cand] * 4  # disposable runs leave no checkpoint
+
+
+def test_parse_suite_ignores_counts_outside_summary_line() -> None:
+    probe = "FAILED t.py::x - assert 3 passed\n=== 1 failed, 4 passed =="
+    assert parse_suite(probe) == {"passed": 4, "failed": 1}
+    quiet = "collected 3 passed hints\n3 passed in 0.02s\n"
+    assert parse_suite(quiet) == {"passed": 3, "failed": 0}
+
+
+@pytest.mark.parametrize("stdout", ["", "no tests ran in 0.01s\n", "Traceback: ImportError\n"])
+def test_parse_suite_empty_when_no_counts(stdout: str) -> None:
+    assert parse_suite(stdout) == {}
