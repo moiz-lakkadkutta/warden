@@ -193,14 +193,27 @@ def run_pipeline(
 ) -> dict[str, Any]:
     """Run every phase after `start_after` up to `stop_after`; return the result dict.
 
-    Fresh start (`start_after is None`): writes run.json. Resume: run.json must exist with the
-    Steps' mode and `start_after` must be the last completed phase — the marker is the next
-    phase's input, so the two coincide by construction.
+    run.json is written once, when absent; an existing one is the run's manifest — its mode must
+    match the Steps and its `issue` fills `requested_issue` when the caller passed None. Resume:
+    `start_after` must be the last completed phase — the marker is the next phase's input, so the
+    two coincide by construction.
     """
     prog: Progress = NullProgress() if progress is None else progress
     run_dir = log.dir
     artifacts = run_dir / "artifacts"
     manifest = run_dir / "run.json"
+    if manifest.exists():
+        recorded = json.loads(manifest.read_text(encoding="utf-8"))
+        if recorded.get("mode") != steps.mode:
+            raise ValueError(
+                f"run {log.run_id} has mode {recorded.get('mode')!r}, steps are {steps.mode!r}"
+            )
+        if requested_issue is None:
+            requested_issue = recorded.get("issue")
+    elif start_after is not None:
+        raise ValueError(f"cannot resume {log.run_id}: run.json missing")
+    else:
+        _write_atomic(manifest, json.dumps({"mode": steps.mode, "issue": requested_issue}))
     ctx = StepContext(
         settings=settings,
         log=log,
@@ -213,14 +226,7 @@ def run_pipeline(
     )
     done = completed_phases(run_dir)
     outputs: dict[Phase, Any] = {}
-    if start_after is None:
-        _write_atomic(manifest, json.dumps({"mode": steps.mode, "issue": requested_issue}))
-    else:
-        if not manifest.exists():
-            raise ValueError(f"cannot resume {log.run_id}: run.json missing")
-        mode = json.loads(manifest.read_text(encoding="utf-8")).get("mode")
-        if mode != steps.mode:
-            raise ValueError(f"run {log.run_id} has mode {mode!r}, steps are {steps.mode!r}")
+    if start_after is not None:
         if not done or start_after != done[-1]:
             raise ValueError(
                 f"cannot resume after {start_after}: completed phases are "

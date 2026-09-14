@@ -370,3 +370,43 @@ def test_no_except_in_pipeline() -> None:
     assert not [n for n in ast.walk(tree) if isinstance(n, ast.Try | ast.TryStar)]
     assert "import typer" not in src and "from warden import ui" not in src
     assert "warden.ui" not in src
+
+
+def test_existing_manifest_is_never_rewritten(settings: Settings) -> None:
+    log = EventLog(settings.runs_dir)
+    run_dir = settings.runs_dir / log.run_id
+    manifest = run_dir / "run.json"
+    manifest.write_text('{"mode": "demo", "issue": 7}')  # zero markers, e.g. crashed in hunt
+    before = manifest.read_bytes()
+    seen: list[int | None] = []
+    ran: list[Phase] = []
+    base = scripted(ran)
+
+    def hunt(ctx: StepContext) -> IssueRef:
+        seen.append(ctx.requested_issue)
+        return base.hunt(ctx)
+
+    steps = Steps(
+        mode="demo", hunt=hunt, plan=base.plan, fix=base.fix, verify=base.verify, pr=base.pr
+    )
+    result = run_pipeline(
+        settings, log, steps, start_after=None, json_out=False, yes=False, progress=None
+    )
+    log.close()
+    assert manifest.read_bytes() == before
+    assert seen == [7]
+    assert result["verdict"] == "PASS" and ran == list(PHASES)
+
+
+def test_existing_manifest_mode_guard_on_fresh_start(settings: Settings) -> None:
+    log = EventLog(settings.runs_dir)
+    manifest = settings.runs_dir / log.run_id / "run.json"
+    manifest.write_text('{"mode": "live", "issue": 7}')
+    ran: list[Phase] = []
+    with pytest.raises(ValueError, match="mode"):
+        run_pipeline(
+            settings, log, scripted(ran), start_after=None, json_out=False, yes=False, progress=None
+        )
+    log.close()
+    assert ran == []
+    assert json.loads(manifest.read_text()) == {"mode": "live", "issue": 7}

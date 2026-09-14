@@ -319,3 +319,38 @@ def test_run_id_option(tmp_path: Path) -> None:
     assert (tmp_path / "runs" / "demo-x" / "artifacts" / "pr.json").exists()
     help_out = _invoke("run", "--help").stdout
     assert "--run-id" not in help_out
+
+
+def test_resume_live_keeps_manifest_and_exits_3(tmp_path: Path) -> None:
+    creds = {"NEBIUS_API_KEY": "x", "CONTREE_BASE_URL": "http://c", "NEBIUS_PROJECT_ID": "p"}
+    run_id = _run_id(_invoke("run", "--issue", "7", env=creds).stderr)
+    manifest = tmp_path / "runs" / run_id / "run.json"
+    assert json.loads(manifest.read_text()) == {"mode": "live", "issue": 7}
+    res = _invoke("resume", run_id, env=creds)
+    assert res.exit_code == 3, res.stderr
+    assert "fix: use --demo for now" in res.stderr
+    assert f"run_id {run_id}   (resuming after start)" in res.stderr
+    assert json.loads(manifest.read_text()) == {"mode": "live", "issue": 7}
+
+
+def test_run_id_collision_exits_2(tmp_path: Path) -> None:
+    res = _invoke("run", "--demo", "--run-id", "dup")
+    assert res.exit_code == 0, res.stderr
+    events = tmp_path / "runs" / "dup" / "events.jsonl"
+    n = len(events.read_text().splitlines())
+    res = _invoke("run", "--demo", "--run-id", "dup")
+    assert res.exit_code == 2
+    lines = res.stderr.splitlines()
+    assert lines[0] == "run dup already exists"
+    assert lines[1] == "fix: warden resume dup, or pick another --run-id"
+    assert lines[2] == "run_id dup"
+    assert res.stdout == ""
+    assert len(events.read_text().splitlines()) == n
+
+
+def test_resume_errors_carry_run_id() -> None:
+    res = _invoke("resume", "nope")
+    assert res.exit_code == 1 and "run_id nope" in res.stderr
+    run_id = _run_id(_invoke("run", "--demo").stderr)
+    res = _invoke("resume", run_id)
+    assert res.exit_code == 2 and f"run_id {run_id}" in res.stderr

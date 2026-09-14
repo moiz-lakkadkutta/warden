@@ -264,6 +264,13 @@ def run(
     s = load_settings()
     if max_usd is not None:
         s.max_usd_per_issue = max_usd
+    if run_id is not None and (s.runs_dir / run_id / "run.json").exists():
+        fail(
+            f"run {run_id} already exists",
+            fix=f"warden resume {run_id}, or pick another --run-id",
+            run_id=run_id,
+            code=2,
+        )
     log = EventLog(s.runs_dir, run_id, json_stream=stdout_stream() if json_out else None)
     _err(f"run_id {log.run_id}   (resume with: warden resume {log.run_id})")
     progress = ui.PhaseLog()  # stderr; --json only changes stdout
@@ -330,13 +337,19 @@ def resume(
     s = load_settings()
     run_dir = s.runs_dir / run_id
     if not (run_dir / "events.jsonl").exists():
-        fail(f"no run {run_id} under {s.runs_dir}", fix=f"ls {s.runs_dir}")
+        fail(f"no run {run_id} under {s.runs_dir}", fix=f"ls {s.runs_dir}", run_id=run_id)
     if not (run_dir / "run.json").exists():
         fail(f"run {run_id} predates resume", fix="re-run: warden run --demo", run_id=run_id)
     done = completed_phases(run_dir)
     if "pr" in done:
-        fail(f"run {run_id} already complete", fix=f"warden console --run {run_id}", code=2)
-    mode = json.loads((run_dir / "run.json").read_text(encoding="utf-8")).get("mode")
+        fail(
+            f"run {run_id} already complete",
+            fix=f"warden console --run {run_id}",
+            run_id=run_id,
+            code=2,
+        )
+    manifest = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
+    mode = manifest.get("mode")
     log = EventLog(s.runs_dir, run_id, json_stream=stdout_stream() if json_out else None)
     _err(f"run_id {run_id}   (resuming after {done[-1] if done else 'start'})")
     progress = ui.PhaseLog()
@@ -356,6 +369,7 @@ def resume(
             json_out=json_out,
             yes=yes,
             progress=progress,
+            requested_issue=manifest.get("issue"),
         )
         if not json_out:
             _err(result["evidence"])
