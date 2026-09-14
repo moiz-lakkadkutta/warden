@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Callable
 from io import StringIO
 from pathlib import Path
 from typing import Any
@@ -11,7 +12,9 @@ import pytest
 
 from warden.integrate.pr import PrOpenError, confirm_pr, labels_for, open_draft_pr
 from warden.runlog.events import EventLog
-from warden.schemas import Plan
+from warden.schemas import Plan, RiskClass
+
+MakePlan = Callable[[list[RiskClass]], Plan]
 
 GH_OK = "Creating pull request…\nhttps://github.com/o/r/pull/12\n"
 
@@ -34,19 +37,6 @@ class FakeRunner:
         self.calls.append((list(argv), dict(kwargs)))
         self.body_seen = Path(argv[argv.index("--body-file") + 1]).read_text(encoding="utf-8")
         return subprocess.CompletedProcess(argv, self.rc, stdout=self.stdout, stderr=self.stderr)
-
-
-def _plan(risk: list[str]) -> Plan:
-    return Plan(
-        issue=1,
-        summary="s",
-        files_to_touch=[],
-        tests_to_add=[],
-        landing_order=[],
-        risk_class=risk,  # type: ignore[arg-type]
-        citations=[],
-        acceptance=[],
-    )
 
 
 def _open(runner: FakeRunner, **kw: Any) -> Any:
@@ -97,18 +87,18 @@ def test_last_url_wins() -> None:
 
 
 # 2 -----------------------------------------------------------------------------------------------
-def test_labels_for() -> None:
-    assert labels_for(_plan(["money"])) == ["PENDING-HUMAN"]
-    assert labels_for(_plan(["concurrency"])) == []
+def test_labels_for(make_plan: MakePlan) -> None:
+    assert labels_for(make_plan(["money"])) == ["PENDING-HUMAN"]
+    assert labels_for(make_plan(["concurrency"])) == []
 
 
-def test_labels_in_argv() -> None:
+def test_labels_in_argv(make_plan: MakePlan) -> None:
     r = FakeRunner()
-    _open(r, labels=labels_for(_plan(["money"])))
+    _open(r, labels=labels_for(make_plan(["money"])))
     argv = r.calls[0][0]
     assert argv[-2:] == ["--label", "PENDING-HUMAN"]
     r2 = FakeRunner()
-    _open(r2, labels=labels_for(_plan(["concurrency"])))
+    _open(r2, labels=labels_for(make_plan(["concurrency"])))
     assert "--label" not in r2.calls[0][0]
 
 
@@ -176,6 +166,40 @@ def test_event_emitted_on_failure(tmp_path: Path) -> None:
     assert events[0].data["exit_code"] == 1 and events[0].data["url"] is None
 
 
+class RaisingRunner(FakeRunner):
+    def __call__(self, argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        self.calls.append((list(argv), dict(kwargs)))
+        raise FileNotFoundError(2, "No such file or directory", "gh")
+
+
+def test_runner_oserror_becomes_pr_open_error(capsys: pytest.CaptureFixture[str]) -> None:
+    r = RaisingRunner()
+    with pytest.raises(PrOpenError) as ei:
+        _open(r)
+    e = ei.value
+    assert str(e).startswith("could not run gh: ")
+    assert "gh" in str(e) and "ERROR" not in str(e)
+    assert e.fix == "install gh (see `warden doctor`)"
+    assert e.stderr_tail == ""
+    assert isinstance(e.__cause__, FileNotFoundError)
+    assert not Path(r.calls[0][0][-1]).exists()  # temp body file still cleaned up
+    assert capsys.readouterr().out == ""
+
+
+def test_runner_oserror_still_emits_event(tmp_path: Path) -> None:
+    log = EventLog(tmp_path)
+    with pytest.raises(PrOpenError):
+        _open(RaisingRunner(), log=log)
+    log.close()
+    events = EventLog.read(tmp_path, log.run_id)
+    assert len(events) == 1
+    ev = events[0]
+    assert ev.phase == "pr" and ev.kind == "tool"
+    assert ev.data["name"] == "gh"
+    assert ev.data["exit_code"] is None and ev.data["url"] is None
+    assert "gh" in ev.data["error"]
+
+
 # 6 -----------------------------------------------------------------------------------------------
 def test_confirm_yes_bypasses(capsys: pytest.CaptureFixture[str]) -> None:
     buf = StringIO()
@@ -216,3 +240,14 @@ def test_confirm_tty(typed: str, expected: bool, capsys: pytest.CaptureFixture[s
     else:
         assert "not opening the PR" in out
     assert capsys.readouterr().out == ""
+
+
+def test_confirm_defaults_write_to_stderr(capsys: pytest.CaptureFixture[str]) -> None:
+    assert confirm_pr(False, what="w", run_id="r9", input=StringIO()) is False
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "Not opening the draft PR" in captured.err
+    assert "re-run with --yes" in captured.err and "r9" in captured.err
+    assert confirm_pr(True, what="w", input=StringIO()) is True
+    captured = capsys.readouterr()
+    assert captured.out == "" and "--yes" in captured.err

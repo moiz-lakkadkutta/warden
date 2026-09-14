@@ -93,6 +93,17 @@ def open_draft_pr(
     started = time.monotonic()
     try:
         completed = runner(argv, capture_output=True, text=True, check=False)
+    except OSError as e:  # gh not installed, not executable, ...
+        if log is not None:
+            log.emit(
+                "pr",
+                "tool",
+                {"name": "gh", "args": argv[1:], "exit_code": None, "url": None, "error": str(e)},
+                ms=int((time.monotonic() - started) * 1000),
+            )
+        raise PrOpenError(
+            f"could not run gh: {e}", fix="install gh (see `warden doctor`)", stderr_tail=""
+        ) from e
     finally:
         if cleanup:
             body_path.unlink(missing_ok=True)
@@ -127,10 +138,16 @@ def confirm_pr(
     *,
     what: str,
     run_id: str | None = None,
-    input: TextIO = sys.stdin,
-    err: TextIO = sys.stderr,
+    input: TextIO | None = None,
+    err: TextIO | None = None,
 ) -> bool:
-    """The product's only confirmation. Prompts on stderr so `--json` stdout stays valid JSONL."""
+    """The product's only confirmation. Prompts on stderr so `--json` stdout stays valid JSONL.
+
+    `input`/`err` default to the *current* sys.stdin/sys.stderr (resolved at call time, so
+    redirections and capture work); tests inject StringIO.
+    """
+    input = sys.stdin if input is None else input
+    err = sys.stderr if err is None else err
     if yes:
         err.write("opening draft PR without asking (--yes)\n")
         err.flush()
