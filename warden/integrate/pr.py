@@ -1,14 +1,155 @@
-"""Render the evidence table — the single artefact judges and reviewers read.
+"""Render the evidence table and open the draft PR — the single artefact judges and reviewers read.
 
 The console shows the same table; the PR embeds it. Rows are claims with the exact command and
 result. An explicit "Not verified" row is always present.
+
+Opening the PR is the product's one risky action (ux-brief §2.3): `confirm_pr` asks on stderr
+(stdout stays pure data under `--json`), `--yes` bypasses, and a non-TTY refuses with the fix line.
+`open_draft_pr` shells out to `gh` through an injectable runner so tests and `--demo` never call it.
 """
 
 from __future__ import annotations
 
+import re
+import subprocess
+import sys
+import tempfile
+import time
+from collections.abc import Callable
+from dataclasses import dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING, TextIO
+
 from warden.schemas import Plan, Verdict
 
+if TYPE_CHECKING:
+    from warden.runlog.events import EventLog
+
 PENDING_LABEL = "PENDING-HUMAN"
+
+Runner = Callable[..., subprocess.CompletedProcess[str]]
+
+_PR_URL = re.compile(r"https://\S+/pull/\d+")
+
+
+def labels_for(plan: Plan) -> list[str]:
+    """The one place that decides the PR label; C4 only adds a body reason."""
+    return [PENDING_LABEL] if plan.needs_human else []
+
+
+@dataclass(frozen=True)
+class PrResult:
+    url: str
+    argv: list[str]
+    exit_code: int
+
+
+class PrOpenError(RuntimeError):
+    """`str(err)` is the human sentence only; the caller prints fix and run_id after it."""
+
+    def __init__(self, message: str, *, fix: str, stderr_tail: str = "") -> None:
+        super().__init__(message)
+        self.fix = fix
+        self.stderr_tail = stderr_tail
+
+
+def open_draft_pr(
+    repo: str,
+    head: str,
+    base: str,
+    title: str,
+    body: str,
+    *,
+    labels: list[str],
+    runner: Runner = subprocess.run,
+    log: EventLog | None = None,
+) -> PrResult:
+    """Run `gh pr create --draft` and return the PR URL; raise PrOpenError on any failure."""
+    body_path: Path
+    if log is not None:
+        body_path = log.artifact("pr_body.md", body)  # same artefact the console renders
+        cleanup = False
+    else:
+        with tempfile.NamedTemporaryFile("w", suffix=".md", encoding="utf-8", delete=False) as tmp:
+            tmp.write(body)
+            body_path = Path(tmp.name)
+        cleanup = True
+    argv = [
+        "gh",
+        "pr",
+        "create",
+        "--draft",
+        "--repo",
+        repo,
+        "--head",
+        head,
+        "--base",
+        base,
+        "--title",
+        title,
+        "--body-file",
+        str(body_path),
+    ] + [tok for label in labels for tok in ("--label", label)]
+    started = time.monotonic()
+    try:
+        completed = runner(argv, capture_output=True, text=True, check=False)
+    finally:
+        if cleanup:
+            body_path.unlink(missing_ok=True)
+    rc = completed.returncode
+    matches = _PR_URL.findall(completed.stdout or "")
+    url = matches[-1] if matches else None
+    if log is not None:
+        log.emit(
+            "pr",
+            "tool",
+            {"name": "gh", "args": argv[1:], "exit_code": rc, "url": url},
+            ms=int((time.monotonic() - started) * 1000),
+        )
+    tail = "\n".join((completed.stderr or "").strip().splitlines()[-3:])
+    if rc != 0:
+        raise PrOpenError(
+            f"gh could not open the draft PR for {head} on {repo} (exit {rc}).",
+            fix=f"check `gh auth status` and that {head} is pushed; then re-run",
+            stderr_tail=tail,
+        )
+    if url is None:
+        raise PrOpenError(
+            "gh exited 0 but printed no PR URL.",
+            fix="run the gh command from the run log by hand",
+            stderr_tail=tail,
+        )
+    return PrResult(url=url, argv=argv, exit_code=rc)
+
+
+def confirm_pr(
+    yes: bool,
+    *,
+    what: str,
+    run_id: str | None = None,
+    input: TextIO = sys.stdin,
+    err: TextIO = sys.stderr,
+) -> bool:
+    """The product's only confirmation. Prompts on stderr so `--json` stdout stays valid JSONL."""
+    if yes:
+        err.write("opening draft PR without asking (--yes)\n")
+        err.flush()
+        return True
+    if not input.isatty():
+        err.write("Not opening the draft PR: no terminal to ask on.\n")
+        err.write("fix: re-run with --yes (CI), or run interactively.\n")
+        if run_id:
+            err.write(f"run_id {run_id}\n")
+        err.flush()
+        return False
+    err.write(f"Open draft PR? {what} [y/N] ")
+    err.flush()
+    answer = input.readline().strip().casefold()
+    if answer in ("y", "yes"):
+        return True
+    err.write("not opening the PR\n")
+    err.flush()
+    return False
 
 
 def evidence_table(

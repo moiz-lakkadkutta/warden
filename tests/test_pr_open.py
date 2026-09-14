@@ -169,7 +169,7 @@ def test_tempfile_removed_on_failure() -> None:
 def test_event_emitted_on_failure(tmp_path: Path) -> None:
     log = EventLog(tmp_path)
     with pytest.raises(PrOpenError):
-        _open(FakeRunner(rc=1, stderr="boom"), log=log)
+        _open(FakeRunner(stdout="", rc=1, stderr="boom"), log=log)
     log.close()
     events = EventLog.read(tmp_path, log.run_id)
     assert len(events) == 1
