@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import secrets
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, TextIO
 
@@ -74,8 +74,10 @@ class EventLog:
             self._json_stream.flush()
 
     def close(self) -> None:
-        self._events.close()
-        self._cost.close()
+        """Idempotent: closing twice is safe (the CLI closes on both the happy and error paths)."""
+        for f in (self._events, self._cost):
+            if not f.closed:
+                f.close()
 
     @staticmethod
     def read(runs_dir: Path, run_id: str) -> list[RunEvent]:
@@ -87,6 +89,27 @@ class EventLog:
             for line in path.read_text(encoding="utf-8").splitlines()
             if line
         ]
+
+    @staticmethod
+    def read_result(runs_dir: Path, run_id: str) -> dict[str, Any] | None:
+        path = runs_dir / run_id / "result.json"
+        if not path.exists():
+            return None
+        data: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+        return data
+
+
+def phase_spans(events: list[RunEvent]) -> dict[Phase, tuple[datetime, datetime]]:
+    """Per phase: (first ts, last ts + last event's ms). Phases with no events are omitted."""
+    spans: dict[Phase, tuple[datetime, datetime]] = {}
+    for ev in events:
+        end = ev.ts + timedelta(milliseconds=ev.ms or 0)
+        if ev.phase in spans:
+            start, _ = spans[ev.phase]
+            spans[ev.phase] = (min(start, ev.ts), end)
+        else:
+            spans[ev.phase] = (ev.ts, end)
+    return spans
 
 
 def stdout_stream() -> TextIO:
