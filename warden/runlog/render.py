@@ -256,7 +256,7 @@ def _css() -> str:
         "#header .meta{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;"
         "color:var(--muted)}"
         ".pill{display:inline-block;padding:2px 10px;border-radius:999px;color:#fff;"
-        "font:600 12px/1.6 var(--sans);letter-spacing:.04em}"
+        "background:var(--none);font:600 12px/1.6 var(--sans);letter-spacing:.04em}"
         ".chip{display:inline-block;padding:1px 8px;border:1px solid var(--line);"
         "border-radius:4px;font-family:var(--mono);font-size:12px;background:var(--card)}"
         "#timeline{display:flex;gap:3px;margin:16px 0 0}"
@@ -430,7 +430,7 @@ def _evidence(verdict: str | None, rows: list[tuple[str, str]]) -> str:
             "artifacts/pr_body.md not written</p></section>"
         )
     head = f"<p>Verdict: <strong>{_e(verdict)}</strong></p>" if verdict else ""
-    body = "".join(f"<tr><td>{_e(c)}</td><td>{_e(r)}</td></tr>" for c, r in rows)
+    body = "".join(f"<tr><td>{_e(c)}</td><td>{_e(_plain(r))}</td></tr>" for c, r in rows)
     return (
         f'<section id="evidence">{head}<div class="scroll"><table>'
         "<thead><tr><th>Check</th><th>Result</th></tr></thead>"

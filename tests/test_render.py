@@ -180,9 +180,22 @@ def test_evidence_table_matches_pr_body(demo_events: list[RunEvent]) -> None:
     start = page.index('id="evidence"')
     section = page[start:]
     assert "<table" in section
-    for check, result in parse_evidence(PR_BODY)[1]:
+    rows = parse_evidence(PR_BODY)[1]
+    assert len(rows) == 7
+    for check, result in rows:
         assert html.escape(check) in section
-        assert html.escape(result) in section
+        assert html.escape(result.replace("**", "")) in section
+    assert "money, concurrency → PENDING-HUMAN" in section
+    assert "**" not in section
+
+
+def test_pill_has_neutral_fallback_for_unknown_verdict() -> None:
+    page = render_html("t", [], {"verdict": "WEIRD"}, None)
+    assert 'data-verdict="WEIRD"' in page
+    css = page[page.index("<style>") : page.index("</style>")]
+    base = css.index(".pill{")
+    assert "background:" in css[base : css.index("}", base)]
+    assert base < css.index('.pill[data-verdict="PASS"]')
 
 
 # --- header -----------------------------------------------------------------------------------
