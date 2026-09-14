@@ -14,3 +14,5 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run mypy warden
       - run: uv run pytest -q
+      - name: replay examples/demo-issue-201
+        run: uv run pytest -q tests/test_replay.py

@@ -242,3 +242,115 @@ def test_doctor_no_color() -> None:
     assert ESC not in res.stderr
     assert res.stdout == ""
     assert "Model routing" in res.stderr
+
+
+# ----------------------------------------------------------------------------- B6: resume
+
+
+def test_resume_after_dry_run_completes(tmp_path: Path) -> None:
+    run_id = _run_id(_invoke("run", "--demo", "--dry-run").stderr)
+    res = _invoke("resume", run_id)
+    assert res.exit_code == 0, res.stderr
+    assert res.stdout == ""
+    lines = res.stderr.splitlines()
+    assert not any(ln.startswith("Hunt   ▸") for ln in lines)
+    assert not any(ln.startswith("Plan   ▸") for ln in lines)
+    assert any(ln.startswith("Fix    ▸") for ln in lines)
+    total = next(ln for ln in lines if ln.startswith("Total  ▸"))
+    assert "$1.42  PASS" in total
+    assert lines[0] == f"run_id {run_id}   (resuming after plan)"
+    result = json.loads((tmp_path / "runs" / run_id / "result.json").read_text())
+    assert result["resumed_from"] == "plan" and result["verdict"] == "PASS"
+    assert result["cost_usd"] == pytest.approx(1.42)
+    res = _invoke("console", "--run", run_id)
+    assert res.exit_code == 0, res.stderr
+    assert Path(res.stdout.strip()).exists()
+
+
+def test_resume_json_is_pure() -> None:
+    run_id = _run_id(_invoke("run", "--demo", "--dry-run", "--json").stderr)
+    res = _invoke("resume", run_id, "--json", env={"FORCE_COLOR": "1"})
+    assert res.exit_code == 0, res.stderr
+    lines = [json.loads(ln) for ln in res.stdout.splitlines() if ln.strip()]
+    assert lines and lines[-1]["type"] == "result"
+    assert lines[-1]["resumed_from"] == "plan" and lines[-1]["verdict"] == "PASS"
+    assert {e["phase"] for e in lines[:-1]} == {"fix", "verify", "pr"}
+    assert ESC not in res.stdout
+
+
+def test_resume_complete_run_exit_2() -> None:
+    run_id = _run_id(_invoke("run", "--demo").stderr)
+    res = _invoke("resume", run_id)
+    assert res.exit_code == 2
+    assert f"run {run_id} already complete" in res.stderr
+    assert f"fix: warden console --run {run_id}" in res.stderr
+    assert res.stdout == ""
+
+
+def test_resume_run_without_manifest(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "old"
+    run_dir.mkdir(parents=True)
+    (run_dir / "events.jsonl").write_text("")
+    res = _invoke("resume", "old")
+    assert res.exit_code == 1
+    assert "run old predates resume" in res.stderr
+    assert "fix: re-run: warden run --demo" in res.stderr
+
+
+def test_run_live_exits_3_via_machine(tmp_path: Path) -> None:
+    creds = {"NEBIUS_API_KEY": "x", "CONTREE_BASE_URL": "http://c", "NEBIUS_PROJECT_ID": "p"}
+    res = _invoke("run", "--issue", "1", env=creds)
+    assert res.exit_code == 3, res.stderr
+    assert "live pipeline lands in Phase B" in res.stderr
+    assert "fix: use --demo for now" in res.stderr
+    run_id = _run_id(res.stderr)
+    manifest = json.loads((tmp_path / "runs" / run_id / "run.json").read_text())
+    assert manifest == {"mode": "live", "issue": 1}
+    assert not list((tmp_path / "runs" / run_id / "artifacts").iterdir())
+    assert res.stdout == ""
+
+
+def test_run_id_option(tmp_path: Path) -> None:
+    res = _invoke("run", "--demo", "--json", "--run-id", "demo-x")
+    assert res.exit_code == 0, res.stderr
+    assert _run_id(res.stderr) == "demo-x"
+    lines = [json.loads(ln) for ln in res.stdout.splitlines() if ln.strip()]
+    assert lines[-1]["run_id"] == "demo-x"
+    assert (tmp_path / "runs" / "demo-x" / "artifacts" / "pr.json").exists()
+    help_out = _invoke("run", "--help").stdout
+    assert "--run-id" not in help_out
+
+
+def test_resume_live_keeps_manifest_and_exits_3(tmp_path: Path) -> None:
+    creds = {"NEBIUS_API_KEY": "x", "CONTREE_BASE_URL": "http://c", "NEBIUS_PROJECT_ID": "p"}
+    run_id = _run_id(_invoke("run", "--issue", "7", env=creds).stderr)
+    manifest = tmp_path / "runs" / run_id / "run.json"
+    assert json.loads(manifest.read_text()) == {"mode": "live", "issue": 7}
+    res = _invoke("resume", run_id, env=creds)
+    assert res.exit_code == 3, res.stderr
+    assert "fix: use --demo for now" in res.stderr
+    assert f"run_id {run_id}   (resuming after start)" in res.stderr
+    assert json.loads(manifest.read_text()) == {"mode": "live", "issue": 7}
+
+
+def test_run_id_collision_exits_2(tmp_path: Path) -> None:
+    res = _invoke("run", "--demo", "--run-id", "dup")
+    assert res.exit_code == 0, res.stderr
+    events = tmp_path / "runs" / "dup" / "events.jsonl"
+    n = len(events.read_text().splitlines())
+    res = _invoke("run", "--demo", "--run-id", "dup")
+    assert res.exit_code == 2
+    lines = res.stderr.splitlines()
+    assert lines[0] == "run dup already exists"
+    assert lines[1] == "fix: warden resume dup, or pick another --run-id"
+    assert lines[2] == "run_id dup"
+    assert res.stdout == ""
+    assert len(events.read_text().splitlines()) == n
+
+
+def test_resume_errors_carry_run_id() -> None:
+    res = _invoke("resume", "nope")
+    assert res.exit_code == 1 and "run_id nope" in res.stderr
+    run_id = _run_id(_invoke("run", "--demo").stderr)
+    res = _invoke("resume", run_id)
+    assert res.exit_code == 2 and f"run_id {run_id}" in res.stderr

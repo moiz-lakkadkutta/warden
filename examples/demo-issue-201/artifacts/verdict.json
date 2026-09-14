@@ -1,0 +1,26 @@
+{
+  "decision": "PASS",
+  "theater_failed_on_base": true,
+  "suite": {
+    "passed": 214,
+    "failed": 0
+  },
+  "mypy_ok": true,
+  "ruff_ok": true,
+  "alembic_single_head": true,
+  "openapi_drift": false,
+  "race": {
+    "threads": 8,
+    "effects_on_base": 3,
+    "effects_on_candidate": 1
+  },
+  "not_verified": [
+    "frontend",
+    "e-invoice path"
+  ],
+  "concerns": [],
+  "reasons": [
+    "new test fails on base and passes on candidate",
+    "race probe returns 1 effect"
+  ]
+}

@@ -10,7 +10,10 @@ is opened. Runs on **Nebius Token Factory Sandboxes** with **NVIDIA Nemotron 3 U
 uvx warden doctor            # checks tools + keys, no network
 uvx warden run --demo        # whole loop on a fake sandbox, no credentials, ~2 s
 uvx warden console           # render the run's timeline + evidence table
+uvx warden resume <run_id>   # continue an interrupted run from its last completed phase
 ```
+
+[examples/demo-issue-201](examples/demo-issue-201) is a recorded `--demo` run; CI replays it offline.
 
 ## Runs on Nebius
 
@@ -50,6 +53,7 @@ cp .env.example .env         # Nebius key, Sandboxes base URL, Tavily key
 uv run warden doctor --live
 uv run warden init /path/to/repo
 uv run warden run --issue 201 --dry-run
+uv run warden resume <run_id>   # printed on the first line of every run
 ```
 
 ## Feedback on the tooling

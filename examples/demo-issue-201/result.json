@@ -1,0 +1,10 @@
+{
+  "type": "result",
+  "run_id": "demo-issue-201",
+  "issue": 201,
+  "verdict": "PASS",
+  "cost_usd": 1.42,
+  "evidence": "## Warden evidence \u2014 #201 double-posted voucher on concurrent invoice finalize\n\n**Verdict: PASS**\n\n| Check | Result |\n|---|---|\n| New tests on unfixed base | FAIL \u2014 as required |\n| Full suite on candidate | 214 passed, 0 failed |\n| Race probe | 8 threads \u2192 1 effect(s) (was 3) |\n| Gate | mypy clean \u00b7 ruff clean \u00b7 1 alembic head \u00b7 no openapi drift |\n| Not verified | frontend, e-invoice path |\n| Risk class | money, concurrency \u2192 **PENDING-HUMAN** |\n| Cost | $1.42 \u00b7 Nemotron-3-Ultra-550b-a55b 2 \u00b7 nemotron-3-super-120b-a12b 11 \u00b7 Nemotron-3_5-Lightning 37 |\n\n**Plan citations**\n- [with_for_update() emits SELECT \u2026 FOR UPDATE, serialising finalizers](https://docs.sqlalchemy.org/en/20/orm/queryguide/query.html#sqlalchemy.orm.Query.with_for_update)\n",
+  "pr_url": null,
+  "resumed_from": null
+}

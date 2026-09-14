@@ -6,15 +6,21 @@ network; stdout is data, stderr is progress; `--json` streams JSONL events; ever
 
 from __future__ import annotations
 
+import contextlib
+import json
 import shutil
 import sys
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 import typer
 
 from warden import ui
 from warden.ui import fail
+
+if TYPE_CHECKING:
+    from warden.runlog.events import EventLog
 
 app = typer.Typer(
     name="warden",
@@ -48,6 +54,35 @@ def _err(msg: str) -> None:
 
 def _mark(ok: bool) -> str:
     return ui.paint("✓", "32") if ok else ui.paint("✗", ui.RED)
+
+
+@contextlib.contextmanager
+def _guarded(log: EventLog) -> Iterator[None]:
+    """The only sanctioned catches around the machine: each becomes the error block + exit code.
+
+    Cost cap → 4, PR open → 1, not-ready → 3. Nothing else is caught (see the NOTE above):
+    `typer.Exit` and real bugs propagate. The log is closed on every path.
+    """
+    from warden.integrate.pr import PrOpenError
+    from warden.llm.cost import CostCapExceededError
+    from warden.pipeline import NotReadyError
+
+    try:
+        yield
+    except CostCapExceededError as e:  # cost.py already emitted the cost_cap event
+        fail(str(e), run_id=log.run_id, code=4, exc=e)
+    except PrOpenError as e:
+        fail(str(e), fix=e.fix, run_id=log.run_id, exc=e)
+    except NotReadyError as e:
+        fail(str(e), fix=e.fix, run_id=log.run_id, code=3, exc=e)
+    finally:
+        log.close()
+
+
+def _plain_override(plain: bool) -> None:
+    if plain:
+        cfg = ui.current()
+        ui.configure(ui.UIConfig(color=False, animate=False, debug=cfg.debug))
 
 
 # --------------------------------------------------------------------------- doctor
@@ -219,30 +254,34 @@ def run(
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Open the PR without asking.")] = False,
     max_usd: Annotated[float | None, typer.Option(help="Override the per-issue cost cap.")] = None,
     plain: Annotated[bool, typer.Option(help="No colour or animation.")] = False,
+    run_id: Annotated[str | None, typer.Option("--run-id", hidden=True)] = None,
 ) -> None:
     """Hunt → plan → fix → verify → PR for one issue. Prints run_id first (see `warden resume`)."""
     from warden.config import load_settings
-    from warden.integrate.pr import PrOpenError
-    from warden.llm.cost import CostCapExceededError
     from warden.runlog.events import EventLog, stdout_stream
 
-    if plain:
-        cfg = ui.current()
-        ui.configure(ui.UIConfig(color=False, animate=False, debug=cfg.debug))
+    _plain_override(plain)
     s = load_settings()
     if max_usd is not None:
         s.max_usd_per_issue = max_usd
-    log = EventLog(s.runs_dir, json_stream=stdout_stream() if json_out else None)
+    if run_id is not None and (s.runs_dir / run_id / "run.json").exists():
+        fail(
+            f"run {run_id} already exists",
+            fix=f"warden resume {run_id}, or pick another --run-id",
+            run_id=run_id,
+            code=2,
+        )
+    log = EventLog(s.runs_dir, run_id, json_stream=stdout_stream() if json_out else None)
     _err(f"run_id {log.run_id}   (resume with: warden resume {log.run_id})")
     progress = ui.PhaseLog()  # stderr; --json only changes stdout
 
-    # The only sanctioned catches: they translate to the error block + exit code, never continue.
-    try:
+    with _guarded(log):
         if demo:
             import warden.demo
 
-            result = warden.demo.run_demo(s, log, dry_run=dry_run, progress=progress)
-            log.result(**result)
+            result = warden.demo.run_demo(
+                s, log, dry_run=dry_run, progress=progress, yes=yes, json_out=json_out
+            )
             if not json_out:
                 _err(result["evidence"])
             raise typer.Exit(0)
@@ -262,37 +301,78 @@ def run(
                 run_id=log.run_id,
                 code=2,
             )
-        fail(
-            "live pipeline lands in Phase B (see docs/warden-plan.md §5)",
-            fix="use --demo for now",
-            run_id=log.run_id,
-            code=3,
+        from warden.pipeline import live_steps, run_pipeline
+
+        result = run_pipeline(
+            s,
+            log,
+            live_steps(),
+            start_after=None,
+            json_out=json_out,
+            yes=yes,
+            progress=progress,
+            stop_after="plan" if dry_run else None,
+            requested_issue=issue,
         )
-    except CostCapExceededError as e:  # cost.py already emitted the cost_cap event
-        fail(str(e), run_id=log.run_id, code=4, exc=e)
-    except PrOpenError as e:
-        fail(str(e), fix=e.fix, run_id=log.run_id, exc=e)
-    finally:
-        log.close()
+        if not json_out:
+            _err(result["evidence"])
 
 
 @app.command()
-def resume(run_id: Annotated[str, typer.Argument()]) -> None:
-    """Continue an interrupted run from its last completed phase."""
+def resume(
+    run_id: Annotated[str, typer.Argument(help="The run_id printed by `warden run`.")],
+    json_out: Annotated[
+        bool,
+        typer.Option("--json", help="Stream JSONL events to stdout; final line is the result."),
+    ] = False,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Open the PR without asking.")] = False,
+    plain: Annotated[bool, typer.Option(help="No colour or animation.")] = False,
+) -> None:
+    """Continue an interrupted run from its last completed phase (artifacts decide, not events)."""
     from warden.config import load_settings
-    from warden.runlog.events import EventLog
+    from warden.pipeline import completed_phases, live_steps, run_pipeline
+    from warden.runlog.events import EventLog, stdout_stream
 
+    _plain_override(plain)
     s = load_settings()
-    events = EventLog.read(s.runs_dir, run_id)
-    if not events:
-        fail(f"no run {run_id} under {s.runs_dir}", fix=f"ls {s.runs_dir}")
-    last = events[-1].phase
-    fail(
-        f"{run_id}: {len(events)} events, last phase {last}; resume lands in Phase B6",
-        fix="re-run: warden run --issue N",
-        run_id=run_id,
-        code=3,
-    )
+    run_dir = s.runs_dir / run_id
+    if not (run_dir / "events.jsonl").exists():
+        fail(f"no run {run_id} under {s.runs_dir}", fix=f"ls {s.runs_dir}", run_id=run_id)
+    if not (run_dir / "run.json").exists():
+        fail(f"run {run_id} predates resume", fix="re-run: warden run --demo", run_id=run_id)
+    done = completed_phases(run_dir)
+    if "pr" in done:
+        fail(
+            f"run {run_id} already complete",
+            fix=f"warden console --run {run_id}",
+            run_id=run_id,
+            code=2,
+        )
+    manifest = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
+    mode = manifest.get("mode")
+    log = EventLog(s.runs_dir, run_id, json_stream=stdout_stream() if json_out else None)
+    _err(f"run_id {run_id}   (resuming after {done[-1] if done else 'start'})")
+    progress = ui.PhaseLog()
+
+    with _guarded(log):
+        if mode == "demo":
+            import warden.demo
+
+            steps = warden.demo.demo_steps()
+        else:
+            steps = live_steps()
+        result = run_pipeline(
+            s,
+            log,
+            steps,
+            start_after=done[-1] if done else None,
+            json_out=json_out,
+            yes=yes,
+            progress=progress,
+            requested_issue=manifest.get("issue"),
+        )
+        if not json_out:
+            _err(result["evidence"])
 
 
 @app.command()
