@@ -7,6 +7,7 @@ enough to exercise fork semantics and the theater check without any network.
 from __future__ import annotations
 
 import itertools
+import posixpath
 import shlex
 from dataclasses import dataclass, field
 from typing import Any
@@ -31,6 +32,7 @@ class FakeBackend:
         self._ids = itertools.count(1)
         self.images: dict[str, FakeImage] = {}
         self.calls: list[str] = []
+        self.timeouts: list[int] = []  # parallel to `calls`
 
     def _new(self, parent: FakeImage | None = None) -> FakeImage:
         img = FakeImage(f"img-{next(self._ids):04d}")
@@ -60,6 +62,7 @@ class FakeBackend:
         keep: bool,
     ) -> tuple[str, str, int, Any | None, str]:
         self.calls.append(shell)
+        self.timeouts.append(timeout)
         child = self._new(image) if keep else image
         if files:
             for rel, data in files.items():
@@ -68,9 +71,19 @@ class FakeBackend:
         return stdout, stderr, code, (child if keep else None), child.uuid
 
     def _interpret(self, img: FakeImage, shell: str, cwd: str) -> tuple[str, str, int]:
-        parts = shlex.split(shell) if shell else []
+        try:
+            parts = shlex.split(shell) if shell else []
+        except ValueError:
+            return "", "fake backend: cannot parse shell", 127
+        # `|`-tails are no-ops (e.g. `find … | sort`): tokens from the first bare `|` are dropped.
+        if "||" in parts:
+            return "", "fake backend: unknown command ||", 127
+        if "|" in parts:
+            parts = parts[: parts.index("|")]
         if not parts or parts[0] == "true":
             return "", "", 0
+        if parts[0] == "false":
+            return "", "", 1
         if parts[0] == "echo":
             text = " ".join(parts[1:])
             if ">>" in shell or ">" in shell:
@@ -98,7 +111,85 @@ class FakeBackend:
                 counts = {"failed": 1} if code else {"passed": 1}
             summary = ", ".join(f"{n} {k}" for k, n in counts.items())
             return f"{' '.join(targets)}\n===== {summary} in 0.10s =====\n", "", code
+        if parts[0] == "find":
+            return self._find(img, parts, cwd)
+        if parts[0] == "ls":
+            return self._ls(img, parts, cwd)
+        if parts[0] == "grep":
+            return self._grep(img, parts, cwd)
         return self._interpret_gate(img, parts)
+
+    # -- read-only vocabulary used by fix/tools.py -----------------------------------------
+
+    @staticmethod
+    def _abs(p: str, cwd: str) -> str:
+        return posixpath.normpath(p if p.startswith("/") else f"{cwd.rstrip('/')}/{p}")
+
+    @staticmethod
+    def _under(img: FakeImage, root: str) -> list[str]:
+        """Absolute keys equal to `root` or under `root/`, sorted."""
+        root = root.rstrip("/") or "/"
+        return sorted(k for k in img.files if k == root or k.startswith(root.rstrip("/") + "/"))
+
+    @staticmethod
+    def _shown(key: str, root: str, arg: str) -> str:
+        """Re-spell an absolute key relative to the argument as the user typed it."""
+        root = root.rstrip("/")
+        return arg if key == root else f"{arg.rstrip('/')}{key[len(root) :]}"
+
+    def _find(self, img: FakeImage, parts: list[str], cwd: str) -> tuple[str, str, int]:
+        arg = next((p for p in parts[1:] if not p.startswith("-")), ".")
+        root = self._abs(arg, cwd)
+        keys = self._under(img, root)
+        if not keys:
+            return "", f"find: '{arg}': No such file or directory\n", 1
+        return "".join(self._shown(k, root, arg) + "\n" for k in keys), "", 0
+
+    def _ls(self, img: FakeImage, parts: list[str], cwd: str) -> tuple[str, str, int]:
+        arg = next((p for p in parts[1:] if not p.startswith("-")), ".")
+        root = self._abs(arg, cwd)
+        keys = self._under(img, root)
+        if not keys:
+            return "", f"ls: cannot access '{arg}': No such file or directory\n", 2
+        if keys == [root.rstrip("/")]:
+            return arg + "\n", "", 0
+        prefix = root.rstrip("/") + "/"
+        names = sorted({k[len(prefix) :].split("/", 1)[0] for k in keys})
+        return "".join(n + "\n" for n in names), "", 0
+
+    def _grep(self, img: FakeImage, parts: list[str], cwd: str) -> tuple[str, str, int]:
+        pattern: str | None = None
+        positional: list[str] = []
+        it = iter(parts[1:])
+        for tok in it:
+            if tok == "-e":
+                pattern = next(it, "")
+            elif tok == "--":
+                positional.extend(it)
+            elif tok.startswith("-"):
+                continue
+            else:
+                positional.append(tok)
+        if pattern is None:
+            pattern, positional = (positional[0], positional[1:]) if positional else ("", [])
+        arg = positional[0] if positional else "."
+        root = self._abs(arg, cwd)
+        keys = self._under(img, root)
+        if not keys:
+            return "", f"grep: {arg}: No such file or directory\n", 2
+        out: list[str] = []
+        for key in keys:
+            try:
+                text = img.files[key].decode()
+            except UnicodeDecodeError:
+                continue
+            shown = self._shown(key, root, arg)
+            out.extend(
+                f"{shown}:{n}:{line}\n"
+                for n, line in enumerate(text.splitlines(), 1)
+                if pattern in line
+            )
+        return "".join(out), "", 0 if out else 1
 
     def _interpret_gate(self, img: FakeImage, parts: list[str]) -> tuple[str, str, int]:
         key = " ".join(parts[:2]) if " ".join(parts[:2]) in img.gate_results else parts[0]
