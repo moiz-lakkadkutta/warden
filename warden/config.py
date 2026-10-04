@@ -62,6 +62,9 @@ class Settings(BaseSettings):
     max_usd_per_issue: float = Field(default=3.0, alias="WARDEN_MAX_USD_PER_ISSUE")
     max_tool_turns: int = Field(default=25, alias="WARDEN_MAX_TOOL_TURNS")
     base_image: str = Field(default="warden/fabric-base:latest", alias="WARDEN_BASE_IMAGE")
+    target_repo: str = Field(
+        default="moiz-lakkadkutta/Fabric-Inventory", alias="WARDEN_TARGET_REPO"
+    )
     runs_dir: Path = Field(default=Path("runs"), alias="WARDEN_RUNS_DIR")
 
     def model_for(self, role: Role) -> str:

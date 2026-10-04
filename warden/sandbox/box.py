@@ -13,9 +13,12 @@ import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from warden.runlog.events import EventLog
+
+if TYPE_CHECKING:
+    from warden.config import Settings
 from warden.schemas import Phase
 
 
@@ -66,7 +69,7 @@ class ContreeBackend:
     def use(self, ref: str) -> Any:
         if ref.startswith(("docker://", "oci://")):
             return self._sdk.images.oci(ref)
-        return self._sdk.images.use(ref)
+        return self._sdk.images.use(ref, strict=True)  # resolves the uuid for events
 
     def run(
         self,
@@ -169,3 +172,11 @@ class Box:
 
     def tag(self, name: str) -> None:
         self._b.tag(self._image, name)
+
+
+def open_base(settings: Settings, log: EventLog, *, phase: Phase = "fix") -> Box:
+    """The configured base image (WARDEN_BASE_IMAGE) on the real Sandboxes backend."""
+    backend = ContreeBackend(
+        settings.nebius_api_key, settings.contree_base_url, settings.nebius_project_id
+    )
+    return Box.from_ref(backend, settings.base_image, log, phase=phase)

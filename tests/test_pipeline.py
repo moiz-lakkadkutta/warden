@@ -338,7 +338,7 @@ def test_live_steps_not_ready(settings: Settings) -> None:
     assert "Phase B" in str(ei.value)
     run_dir = settings.runs_dir / log.run_id
     assert json.loads((run_dir / "run.json").read_text()) == {"mode": "live", "issue": 42}
-    assert list((run_dir / "artifacts").iterdir()) == []
+    assert sorted(f.name for f in (run_dir / "artifacts").iterdir()) == ["issue.json", "plan.json"]
 
 
 def test_spent_usd_reads_events(settings: Settings) -> None:

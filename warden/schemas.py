@@ -26,6 +26,17 @@ class Citation(BaseModel):
     claim: str = Field(description="The specific behaviour this URL supports.")
 
 
+class ResearchQueries(BaseModel):
+    """Lightning's pre-plan pass: what to look up in docs, what to grep for in the repo."""
+
+    queries: list[str] = Field(
+        max_length=3, description="Documentation search queries about library behaviour."
+    )
+    code_terms: list[str] = Field(
+        max_length=8, description="Identifiers (functions, fields, classes) to grep for."
+    )
+
+
 class Finding(BaseModel):
     axis: Axis
     severity: Severity

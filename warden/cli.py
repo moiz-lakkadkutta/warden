@@ -124,6 +124,13 @@ def doctor(
     checks.append(
         ("TAVILY_API_KEY", bool(s.tavily_api_key), "free key at tavily.com; needed for cited plans")
     )
+    checks.append(
+        (
+            f"WARDEN_TARGET_REPO ({s.target_repo or 'unset'})",
+            s.target_repo.count("/") == 1,
+            "set WARDEN_TARGET_REPO=owner/name in .env",
+        )
+    )
     checks.append((".env not tracked by git", not _env_tracked(), "git rm --cached .env"))
 
     if live:

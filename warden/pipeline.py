@@ -310,9 +310,45 @@ def live_steps() -> Steps:
 
     return Steps(
         mode="live",
-        hunt=_not_ready,
-        plan=_not_ready,
+        hunt=_live_hunt,
+        plan=_live_plan,
         fix=_not_ready,
         verify=_not_ready,
         pr=_not_ready,
     )
+
+
+def _live_hunt(ctx: StepContext) -> IssueRef:
+    """For `--issue N`: fetch the issue (the Hunter proper lands in C5)."""
+    from warden.hunt.issue import fetch_issue
+
+    if ctx.requested_issue is None:
+        raise NotReadyError("autonomous hunting lands in C5", fix="pass --issue N")
+    issue = fetch_issue(ctx.settings.target_repo, ctx.requested_issue, include_comments=True)
+    ctx.progress.step(f"#{issue.number} {issue.title}")
+    return IssueRef(issue=issue.number, title=issue.title)
+
+
+def _live_plan(ctx: StepContext, ref: IssueRef) -> Plan:
+    from warden.hunt.issue import fetch_issue
+    from warden.llm.client import LLM
+    from warden.llm.cost import CostMeter
+    from warden.plan.planner import plan_issue, sandbox_context
+    from warden.plan.research import research, tavily_client
+    from warden.sandbox.box import open_base
+
+    s = ctx.settings
+    issue = fetch_issue(s.target_repo, ref.issue, include_comments=True)
+    llm = LLM(s, CostMeter(cap_usd=s.max_usd_per_issue - ctx.spent_usd()), ctx.log)
+    box = open_base(s, ctx.log, phase="plan")
+    tav = tavily_client(s.tavily_api_key)
+    plan = plan_issue(
+        llm,
+        issue,
+        context=sandbox_context(lambda cmd: box.run(cmd, cwd="/", keep=False).stdout),
+        search=lambda queries: research(queries, client=tav, log=ctx.log),
+        log=ctx.log,
+        prompt=(Path(__file__).resolve().parents[1] / "prompts" / "planner.md").read_text(),
+    )
+    ctx.progress.step(f"{len(plan.files_to_touch)} files, {len(plan.citations)} citations")
+    return plan

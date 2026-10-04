@@ -306,7 +306,8 @@ def test_run_live_exits_3_via_machine(tmp_path: Path) -> None:
     run_id = _run_id(res.stderr)
     manifest = json.loads((tmp_path / "runs" / run_id / "run.json").read_text())
     assert manifest == {"mode": "live", "issue": 1}
-    assert not list((tmp_path / "runs" / run_id / "artifacts").iterdir())
+    artifacts = tmp_path / "runs" / run_id / "artifacts"
+    assert sorted(f.name for f in artifacts.iterdir()) == ["issue.json", "plan.json"]
     assert res.stdout == ""
 
 
@@ -329,7 +330,7 @@ def test_resume_live_keeps_manifest_and_exits_3(tmp_path: Path) -> None:
     res = _invoke("resume", run_id, env=creds)
     assert res.exit_code == 3, res.stderr
     assert "fix: use --demo for now" in res.stderr
-    assert f"run_id {run_id}   (resuming after start)" in res.stderr
+    assert f"run_id {run_id}   (resuming after plan)" in res.stderr
     assert json.loads(manifest.read_text()) == {"mode": "live", "issue": 7}
 
 

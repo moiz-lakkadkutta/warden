@@ -121,3 +121,21 @@ def test_contree_backend_builds_iam_config_with_project(monkeypatch: pytest.Monk
     assert seen["project_id"] == "proj-1"
     assert seen["base_url"] == "https://sb"
     assert isinstance(seen["config"], FakeConfig)
+
+
+def test_contree_backend_resolves_tags_strictly_so_events_carry_uuids() -> None:
+    from types import SimpleNamespace
+
+    from warden.sandbox.box import ContreeBackend
+
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    def use(ref: str, **kw: object) -> str:
+        calls.append((ref, kw))
+        return "img"
+
+    backend = ContreeBackend.__new__(ContreeBackend)
+    backend._sdk = SimpleNamespace(images=SimpleNamespace(use=use, oci=lambda ref: "oci"))
+    assert backend.use("warden/fabric-base:latest") == "img"
+    assert calls == [("warden/fabric-base:latest", {"strict": True})]
+    assert backend.use("docker://ghcr.io/x/y:1") == "oci"
