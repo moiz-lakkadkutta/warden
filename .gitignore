@@ -11,3 +11,5 @@ runs.db
 dist/
 *.egg-info/
 .DS_Store
+# built from ops/shmshim.c (the A4 spike uploads it into a sandbox layer)
+ops/libshmshim.so

@@ -32,13 +32,36 @@ Every entry: date · tool · what happened · numbers · what would have helped.
   warning is noise or the field means something else. → document the field; don't warn on it.
 - 2026-10-04 · SDK · `ContreeSync(...)` takes a `ContreeConfig`, but the getting-started page shows
   passing a `ContreeAsyncClient`; `WhoAmI.permissions` is a dict, not an object. Both cost a failed run.
+- 2026-10-04 · runtime · **No SysV IPC in the sandbox kernel** (Linux 7.0.6, `shmget` → ENOSYS).
+  Postgres 16 always creates one 56-byte SysV segment, so `pg_ctl start` dies with
+  "could not create shared memory segment: Function not implemented". Shared mmap, memfd, /dev/shm
+  and Redis all work. Workaround: a 100-line LD_PRELOAD shim (ops/shmshim.c) emulating
+  shmget/shmat/shmdt/shmctl over anonymous shared mmap. → enable CONFIG_SYSVIPC, or document its
+  absence next to "full root access"; every Postgres-backed app hits this on day one.
+- 2026-10-04 · A4 numbers: OCI import of a 633 MB public GHCR image 56.5 s (re-import of the same
+  digest 0.4 s); adding a 2-file layer via `files=` 1.2 s; Fabric suite **1787 passed in 774 s** on
+  the sandbox's 4 cores vs 893 s on a GitHub Actions runner, identical count.
+- 2026-10-04 · SDK · with credentials unset, `IAMAuth()` sends the literal env-var NAMES as the token
+  and project, and the API answers `403 You do not have permission to perform this action`. That
+  read like a permissions/beta problem for 20 minutes. → fail client-side with "NEBIUS_API_KEY not
+  set", or answer 401 "invalid token".
 
 ## Token Factory inference
 
-- (fill in after Phase A5) structured-output behaviour of Nemotron 3 Ultra vs the "JSON mode" tag.
+- 2026-10-04 · A5 · `response_format={"type": "json_schema", "strict": true}` with the `Plan` schema
+  worked on Nemotron 3 Ultra in 4 of 5 calls. The 5th returned truncated JSON because it hit the
+  default 8192 completion-token cap: reasoning tokens count against it, with no separate budget.
+  → document the default `max_tokens`, and expose a reasoning budget or report reasoning tokens
+  separately in `usage`.
+- 2026-10-04 · A5 · Ultra plan calls: 8.6–21.9k prompt tokens, 1.9–8.2k completion tokens, 6–22 s,
+  $0.010–0.069 per plan.
 
 ## Nemotron models
 
+- 2026-10-04 · A5 · Nemotron 3.5 Lightning, small structured task (≤3 queries + ≤8 identifiers,
+  ~100 output tokens of JSON): 2.6–4.6k completion tokens and 11–19 s per call, so it is slower
+  than the Ultra plan call that follows it. Cost is fine ($0.001). → a documented way to turn
+  reasoning down for Lightning would make it a real low-latency router.
 - (fill in after Phase B3) Lightning as a tool router: turn count, wrong-tool rate.
 
 ## Nebius Serverless

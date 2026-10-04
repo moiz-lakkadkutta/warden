@@ -1,0 +1,71 @@
+# warden/fabric-base — Fabric's dev image + Postgres 16 + Redis, migrated and seeded.
+# Build with ops/build-base.sh (it builds backend/Dockerfile.dev first and passes DEV_IMAGE).
+#
+# Layout inside the image:
+#   /src            Fabric repo (tracked files + .git), checked out at FABRIC_SHA
+#   /app -> /src/backend   cwd for Warden's gate (pytest, alembic); .venv on PATH
+# Databases (cluster in $PGDATA, trust auth on 127.0.0.1):
+#   test         migrated, empty — what the test suite uses (mirrors Fabric CI)
+#   fabric_demo  migrated + `seed_demo` — what the Hunter probes
+# Sandboxes run each command as a fresh process tree, so nothing is left running in the image:
+# wrap commands that need the DB in `with-services <cmd>`.
+ARG DEV_IMAGE=fabric-dev:latest
+
+# Sandboxes' kernel has no SysV IPC (shmget -> ENOSYS); Postgres needs one tiny SysV segment.
+# ops/shmshim.c emulates it with shared mmap; with-services LD_PRELOADs it into Postgres only.
+FROM debian:trixie-slim AS shmshim
+RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev \
+    && rm -rf /var/lib/apt/lists/*
+COPY ops/shmshim.c /tmp/shmshim.c
+RUN gcc -shared -fPIC -O2 -Wall -Wextra -o /libshmshim.so /tmp/shmshim.c
+
+FROM ${DEV_IMAGE}
+
+ARG FABRIC_SHA
+LABEL org.opencontainers.image.source="https://github.com/moiz-lakkadkutta/Fabric-Inventory" \
+      org.opencontainers.image.description="Warden sandbox base: Fabric-Inventory + Postgres 16 + Redis" \
+      org.opencontainers.image.licenses="MIT" \
+      dev.warden.fabric-sha="${FABRIC_SHA}"
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates curl gnupg git make redis-server \
+    && . /etc/os-release \
+    && install -d /usr/share/postgresql-common/pgdg \
+    && curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+        https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+    && echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
+        > /etc/apt/sources.list.d/pgdg.list \
+    && apt-get update && apt-get install -y --no-install-recommends postgresql-16 \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV PGDATA=/var/lib/postgresql/16/data \
+    PATH=/app/.venv/bin:/usr/lib/postgresql/16/bin:$PATH \
+    DATABASE_URL=postgresql+asyncpg://fabric_app:fabric_app_dev@127.0.0.1:5432/test \
+    MIGRATION_DATABASE_URL=postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/test \
+    DEMO_DATABASE_URL=postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/fabric_demo \
+    REDIS_URL=redis://127.0.0.1:6379/0 \
+    ENVIRONMENT=dev \
+    CI=true
+
+WORKDIR /
+COPY ops/entrypoint.sh /usr/local/bin/with-services
+COPY --from=shmshim /libshmshim.so /usr/local/lib/libshmshim.so
+COPY src /src
+RUN chmod +x /usr/local/bin/with-services \
+    && mv /app/.venv /src/backend/.venv && rm -rf /app && ln -s /src/backend /app \
+    && git config --system --add safe.directory '*' \
+    && git config --system user.name warden && git config --system user.email warden@localhost
+
+RUN install -d -o postgres -g postgres "$PGDATA" \
+    && runuser -u postgres -- initdb -D "$PGDATA" -U postgres --auth=trust >/dev/null \
+    && with-services sh -ec '\
+        psql -h 127.0.0.1 -U postgres -qc "CREATE DATABASE test" ; \
+        psql -h 127.0.0.1 -U postgres -qc "CREATE DATABASE fabric_demo" ; \
+        cd /app ; \
+        alembic upgrade head ; \
+        DATABASE_URL="$DEMO_DATABASE_URL" MIGRATION_DATABASE_URL="$DEMO_DATABASE_URL" alembic upgrade head ; \
+        JWT_SECRET=seed-only-not-a-secret-must-be-long-enough DATABASE_URL="$DEMO_DATABASE_URL" MIGRATION_DATABASE_URL="$DEMO_DATABASE_URL" python -m app.cli.seed_demo'
+
+WORKDIR /app
+ENTRYPOINT ["/usr/local/bin/with-services"]
+CMD ["pytest", "-q"]
