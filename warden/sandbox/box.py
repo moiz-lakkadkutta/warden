@@ -52,13 +52,16 @@ class SandboxBackend(Protocol):
 
 
 class ContreeBackend:
-    """Real backend. Constructed only when CONTREE_BASE_URL and NEBIUS_API_KEY are set."""
+    """Real backend. Constructed only when NEBIUS_API_KEY, CONTREE_BASE_URL and NEBIUS_PROJECT_ID
+    are set. Auth is Nebius IAM: bearer token + `Project` header (the SDK's IAMAuth sends both)."""
 
-    def __init__(self, api_key: str, base_url: str) -> None:
-        from contree_client.httpx import ContreeAsyncClient
+    def __init__(self, api_key: str, base_url: str, project_id: str) -> None:
         from contree_sdk import ContreeSync
+        from contree_sdk.auth import IAMAuth
+        from contree_sdk.config import ContreeConfig
 
-        self._sdk = ContreeSync(ContreeAsyncClient(api_key, base_url=base_url))
+        auth = IAMAuth(token=api_key, project_id=project_id, base_url=base_url)
+        self._sdk = ContreeSync(ContreeConfig(auth=auth))
 
     def use(self, ref: str) -> Any:
         if ref.startswith(("docker://", "oci://")):
@@ -76,17 +79,23 @@ class ContreeBackend:
         files: dict[str, bytes] | None,
         keep: bool,
     ) -> tuple[str, str, int, Any | None, str]:
-        kwargs: dict[str, Any] = {"shell": shell, "cwd": cwd, "disposable": not keep}
+        # The image shell is /bin/sh (dash on ubuntu): no bash-isms like $RANDOM in `shell`.
+        kwargs: dict[str, Any] = {
+            "shell": shell,
+            "cwd": cwd,
+            "timeout": timeout,
+            "disposable": not keep,
+        }
         if env:
             kwargs["env"] = env
         if files:
             kwargs["files"] = files
-        op = image.run(**kwargs)
-        res = op.wait() if hasattr(op, "wait") else op
+        res = image.run(**kwargs).wait()  # run() only prepares; wait() executes
         stdout = res.stdout.decode() if isinstance(res.stdout, bytes) else str(res.stdout or "")
         stderr = res.stderr.decode() if isinstance(res.stderr, bytes) else str(res.stderr or "")
-        child = res if keep else None
-        return stdout, stderr, int(res.exit_code), child, str(getattr(res, "uuid", ""))
+        if not keep:
+            return stdout, stderr, int(res.exit_code), None, ""
+        return stdout, stderr, int(res.exit_code), res, str(getattr(res, "uuid", ""))
 
     def tag(self, image: Any, name: str) -> None:
         image.tag_as(name)

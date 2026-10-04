@@ -1,4 +1,8 @@
+from __future__ import annotations
+
 from pathlib import Path
+
+import pytest
 
 from warden.runlog.events import EventLog
 from warden.sandbox.box import Box
@@ -41,3 +45,79 @@ def test_events_are_logged(tmp_path: Path) -> None:
     log.close()
     events = EventLog.read(tmp_path / "runs", "t")
     assert events and events[-1].kind == "sandbox"
+
+
+class _StubImage:
+    """Mimics contree_sdk lazy images: run() prepares, wait() executes, returns the result."""
+
+    def __init__(self, uuid: str = "base", calls: list[dict[str, object]] | None = None) -> None:
+        self.uuid = uuid
+        self.calls = calls if calls is not None else []
+        self.stdout = ""
+        self.stderr = ""
+        self.exit_code = 0
+
+    def run(self, **kwargs: object) -> _StubImage:
+        self.calls.append(kwargs)
+        child = _StubImage(f"child{len(self.calls)}", self.calls)
+        child.stdout, child.exit_code = "hi\n", 0
+        return child
+
+    def wait(self) -> _StubImage:
+        return self
+
+
+def test_contree_backend_forwards_timeout_and_disposable() -> None:
+    from warden.sandbox.box import ContreeBackend
+
+    backend = ContreeBackend.__new__(ContreeBackend)
+    base = _StubImage()
+    out, _err, code, child, child_uuid = backend.run(
+        base, shell="echo hi", cwd="/app", env=None, timeout=42, files=None, keep=True
+    )
+    assert (out, code, child_uuid) == ("hi\n", 0, "child1")
+    assert child is not None
+    assert base.calls[0]["timeout"] == 42
+    assert base.calls[0]["disposable"] is False
+
+    _, _, _, child2, uuid2 = backend.run(
+        base, shell="true", cwd="/app", env=None, timeout=5, files=None, keep=False
+    )
+    assert base.calls[1]["disposable"] is True
+    assert child2 is None
+    assert uuid2 == ""
+
+
+def test_contree_backend_builds_iam_config_with_project(monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+    import types
+
+    seen: dict[str, object] = {}
+
+    class FakeIAMAuth:
+        def __init__(self, **kw: object) -> None:
+            seen.update(kw)
+
+    class FakeConfig:
+        def __init__(self, auth: object) -> None:
+            seen["auth"] = auth
+
+    class FakeSync:
+        def __init__(self, config: object) -> None:
+            seen["config"] = config
+
+    mods = {
+        "contree_sdk": types.SimpleNamespace(ContreeSync=FakeSync),
+        "contree_sdk.auth": types.SimpleNamespace(IAMAuth=FakeIAMAuth),
+        "contree_sdk.config": types.SimpleNamespace(ContreeConfig=FakeConfig),
+    }
+    for name, mod in mods.items():
+        monkeypatch.setitem(sys.modules, name, mod)
+
+    from warden.sandbox.box import ContreeBackend
+
+    ContreeBackend("k", "https://sb", "proj-1")
+    assert seen["token"] == "k"
+    assert seen["project_id"] == "proj-1"
+    assert seen["base_url"] == "https://sb"
+    assert isinstance(seen["config"], FakeConfig)
