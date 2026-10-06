@@ -537,3 +537,19 @@ def test_prompt_hash() -> None:
     assert prompt_hash("abc") == hashlib.sha256(b"abc").hexdigest()[:12]
     assert len(prompt_hash("")) == 12
     assert PROMPT_PATH.is_file() and PROMPT_PATH.name == "implementer.md"
+
+
+def test_system_message_states_workdir_and_no_cd(log: EventLog) -> None:
+    from warden.fix.implementer import build_messages
+
+    env = _setup(log)
+    system = build_messages("P", env.plan, 5, workdir="/src")[0]["content"]
+    assert "Working directory: /src (the repo root)" in system
+    assert "never `cd`" in system
+
+
+def test_absolute_workdir_test_path_is_normalised(log: EventLog) -> None:
+    env = _setup(log)  # dispatcher cwd /app
+    script = [turn(tool_call("write_file", path=f"/app/{T}", content=TEST_A)), finish_turn()]
+    _, cand = _run(env, script)
+    assert cand.tests_added == [T]

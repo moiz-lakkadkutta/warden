@@ -90,20 +90,22 @@ def prompt_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
 
 
-def _norm(path: str) -> str:
-    return posixpath.normpath(path.strip()).removeprefix("/app/")
+def _norm(path: str, root: str = "/app") -> str:
+    """Repo-relative form of `path`: absolute paths under the workdir `root` lose that prefix."""
+    return posixpath.normpath(path.strip()).removeprefix(root.rstrip("/") + "/")
 
 
-def is_test_path(path: str, plan: Plan) -> bool:
-    """A test file by location (`tests/`), by name (`test_*.py`, `*_test.py`) or by the plan."""
-    p = _norm(path)
+def is_test_path(path: str, plan: Plan, root: str = "/app") -> bool:
+    """A test file by location (`tests/`), by name (`test_*.py`, `*_test.py`) or by the plan
+    (whose tests_to_add may be pytest node ids, `path::test_name`)."""
+    p = _norm(path, root)
     name = posixpath.basename(p)
     return (
         p.startswith("tests/")
         or "/tests/" in p
         or fnmatch(name, "test_*.py")
         or fnmatch(name, "*_test.py")
-        or p in {_norm(t) for t in plan.tests_to_add}
+        or p in {_norm(t.split("::", 1)[0], root) for t in plan.tests_to_add}
     )
 
 
@@ -117,12 +119,17 @@ def removed_tests(before: str, after: str) -> list[str]:
     return out
 
 
-def build_messages(prompt_text: str, plan: Plan, max_tool_turns: int) -> list[dict[str, Any]]:
+def build_messages(
+    prompt_text: str, plan: Plan, max_tool_turns: int, *, workdir: str = "/app"
+) -> list[dict[str, Any]]:
     tools = "\n".join(
         f"- {t['function']['name']} — {t['function']['description']}" for t in ALL_TOOLS
     )
     system = (
         f"{prompt_text.rstrip()}\n\n## Available tools\n{tools}\n\n"
+        f"Working directory: {workdir} (the repo root). Every command already runs there and "
+        "every path is relative to it, so never `cd` (other directories such as /app are not "
+        "the repo).\n"
         f"Budget: {max_tool_turns} tool turns\n"
     )
 
@@ -217,7 +224,8 @@ def run_implementer(
         log.emit(PHASE, "note", {"implementer": what, **data})
 
     prompt_text = PROMPT_PATH.read_text(encoding="utf-8")
-    messages = build_messages(prompt_text, plan, max_tool_turns)
+    root = dispatch.cwd
+    messages = build_messages(prompt_text, plan, max_tool_turns, workdir=root)
     box = base
     turns = 0
     tests_added: list[str] = []
@@ -276,7 +284,7 @@ def run_implementer(
                 and isinstance(args, dict)
                 and isinstance(args.get("path"), str)
                 and isinstance(args.get("content"), str)
-                and is_test_path(args["path"], plan)
+                and is_test_path(args["path"], plan, root)
             )
             if is_test_write:
                 path = str(args["path"])
@@ -293,7 +301,7 @@ def run_implementer(
                     )
                     note("refused_write", path=path, removed=removed)
                     continue
-                key = _norm(path)
+                key = _norm(path, root)
                 if key not in on_base:
                     base_file = _cat(base, path)
                     on_base[key] = base_file.ok
@@ -308,7 +316,7 @@ def run_implementer(
             if name == "write_file" and result.ok:
                 path = str(args["path"])
                 first_write = path if first_write is None else first_write
-                key = _norm(path)
+                key = _norm(path, root)
                 if is_test_write and not on_base.get(key, True):
                     if key not in tests_added:
                         tests_added.append(key)
@@ -321,7 +329,7 @@ def run_implementer(
     if report is None:
         note("budget", tool_turns=turns)
         hooks.step(f"tool budget exhausted after {turns} turns")
-    test_first = first_write is not None and is_test_path(first_write, plan)
+    test_first = first_write is not None and is_test_path(first_write, plan, root)
     note("tdd_order", first_write=first_write, test_first=test_first)
     if tests_added:
         cmd = "pytest -q " + " ".join(shlex.quote(p) for p in tests_added)

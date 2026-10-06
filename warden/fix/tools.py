@@ -208,6 +208,11 @@ class ToolDispatcher:
         self._shell_timeout = shell_timeout
         self.calls = 0  # every dispatch, failures included: each cost a model round-trip
 
+    @property
+    def cwd(self) -> str:
+        """The workdir every tool runs in (the repo root inside the image)."""
+        return self._cwd
+
     def run(self, box: Box, command: str, *, timeout: int = 600) -> RunResult:
         """A command outside the model's tool budget (e.g. the final test run), with the same
         workdir and service wrapper as run_shell; never forks."""
