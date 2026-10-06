@@ -60,7 +60,7 @@ class Settings(BaseSettings):
     # Limits
     max_forks: int = Field(default=4, alias="WARDEN_MAX_FORKS")
     max_usd_per_issue: float = Field(default=3.0, alias="WARDEN_MAX_USD_PER_ISSUE")
-    max_tool_turns: int = Field(default=25, alias="WARDEN_MAX_TOOL_TURNS")
+    max_tool_turns: int = Field(default=40, alias="WARDEN_MAX_TOOL_TURNS")
     base_image: str = Field(default="warden/fabric-base:latest", alias="WARDEN_BASE_IMAGE")
     workdir: str = Field(default="/src", alias="WARDEN_WORKDIR")
     shell_wrap: str = Field(default="with-services sh -c", alias="WARDEN_SHELL_WRAP")

@@ -62,6 +62,13 @@ Every entry: date · tool · what happened · numbers · what would have helped.
   ~100 output tokens of JSON): 2.6–4.6k completion tokens and 11–19 s per call, so it is slower
   than the Ultra plan call that follows it. Cost is fine ($0.001). → a documented way to turn
   reasoning down for Lightning would make it a real low-latency router.
+- 2026-10-06 · A6 · Nemotron 3 Super as a tool-calling implementer (5 tools + finish,
+  `tool_choice=auto`): 19 calls, every one a well-formed tool call, so the Lightning prose router was
+  never needed. 368k prompt / 16.5k completion tokens, 87 s of model time, $0.125 for a
+  correct 2-file fix with 3 tests. Typical per-call latency 1–3 s at 10–34k prompt tokens.
+- 2026-10-06 · A6 · Super's habits worth knowing: it reaches for `cd /app` (a Docker convention)
+  even when told nothing about /app, and it re-reads a file it cannot see whole rather than
+  writing blind (good). Once the workdir is stated in the system prompt it never `cd`s.
 - (fill in after Phase B3) Lightning as a tool router: turn count, wrong-tool rate.
 
 ## Nebius Serverless
