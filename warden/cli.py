@@ -131,6 +131,13 @@ def doctor(
             "set WARDEN_TARGET_REPO=owner/name in .env",
         )
     )
+    checks.append(
+        (
+            f"WARDEN_WORKDIR ({s.workdir})",
+            s.workdir.startswith("/"),
+            "set WARDEN_WORKDIR to the absolute repo root inside the base image",
+        )
+    )
     checks.append((".env not tracked by git", not _env_tracked(), "git rm --cached .env"))
 
     if live:

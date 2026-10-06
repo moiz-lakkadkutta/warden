@@ -165,13 +165,24 @@ class ToolDispatcher:
         cwd: str = "/app",
         max_output: int = 8000,
         shell_timeout: int = 600,
+        shell_wrap: str = "",
     ) -> None:
+        """`shell_wrap` prefixes run_shell commands (quoted as one argument), e.g.
+        `with-services sh -c`, so Postgres/Redis are up: each sandbox run is a fresh process."""
         self._log = log
+        self._shell_wrap = shell_wrap
         self._phase: Phase = phase
         self._cwd = cwd
         self._max_output = max_output
         self._shell_timeout = shell_timeout
         self.calls = 0  # every dispatch, failures included: each cost a model round-trip
+
+    def run(self, box: Box, command: str, *, timeout: int = 600) -> RunResult:
+        """A command outside the model's tool budget (e.g. the final test run), with the same
+        workdir and service wrapper as run_shell; never forks."""
+        if self._shell_wrap:
+            command = f"{self._shell_wrap} {shlex.quote(command)}"
+        return box.run(command, cwd=self._cwd, timeout=timeout, keep=False)
 
     def dispatch(self, box: Box, name: str, args: Any) -> ToolResult:
         """`args` is the parsed dict from `ChatResult.tool_calls[i]["arguments"]`; never raises on
@@ -243,7 +254,10 @@ class ToolDispatcher:
             )
         if isinstance(parsed, RunShellArgs):
             timeout = min(parsed.timeout, self._shell_timeout)
-            res = box.run(parsed.command, cwd=cwd, timeout=timeout, keep=True)
+            command = parsed.command
+            if self._shell_wrap:
+                command = f"{self._shell_wrap} {shlex.quote(command)}"
+            res = box.run(command, cwd=cwd, timeout=timeout, keep=True)
             output = res.stdout
             if res.stderr:
                 output += "\n--- stderr ---\n" + res.stderr

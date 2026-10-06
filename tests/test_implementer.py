@@ -313,10 +313,44 @@ def test_existing_test_file_edit_allowed(log: EventLog) -> None:
     llm, cand = _run(env, script)
     assert env.dispatcher.calls == 1
     assert llm.calls[1].messages[-1]["content"].startswith("wrote ")
-    assert cand.tests_added == []
+    # a test added to an existing file is tracked as a node id, so it can be verified (and the
+    # theater check can run exactly it on base); the pre-existing test_z is not "added"
+    assert cand.tests_added == ["tests/test_old.py::test_y"]
     assert cand.tool_turns == 1
     assert env.backend.images[cand.image_uuid].files["/app/tests/test_old.py"] == grown.encode()
-    assert not [n for n in _notes(log) if n["implementer"] == "final_tests"]
+    assert _note(log, "final_tests")["tests"] == ["tests/test_old.py::test_y"]
+
+
+def test_tests_added_to_existing_file_accumulate_across_writes(log: EventLog) -> None:
+    env = _setup(log)
+    env.image.files["/app/tests/test_old.py"] = b"def test_z():\n    pass\n"
+    one = "def test_z():\n    pass\n\n\ndef test_y():\n    pass\n"
+    two = one + "\n\nasync def test_x():\n    pass\n"
+    script = [
+        turn(tool_call("write_file", path="tests/test_old.py", content=one)),
+        turn(tool_call("write_file", path="tests/test_old.py", content=two)),
+        finish_turn(),
+    ]
+    _, cand = _run(env, script)
+    assert cand.tests_added == ["tests/test_old.py::test_y", "tests/test_old.py::test_x"]
+
+
+def test_final_tests_run_through_dispatcher_workdir_and_wrap(log: EventLog) -> None:
+    from warden.fix.tools import ToolDispatcher
+
+    env = _setup(log)
+    seen: list[tuple[str, str]] = []
+    real_run = env.backend.run
+
+    def spy(image, *, shell, cwd, **kw):  # type: ignore[no-untyped-def]
+        seen.append((shell, cwd))
+        return real_run(image, shell=shell, cwd=cwd, **kw)
+
+    env.backend.run = spy  # type: ignore[method-assign]
+    dispatcher = ToolDispatcher(log, cwd="/app", shell_wrap="env")
+    llm = ScriptedLLM([turn(tool_call("write_file", path=T, content=TEST_A)), finish_turn()])
+    run_implementer(llm, env.base, env.plan, log, dispatcher=dispatcher, max_tool_turns=5)
+    assert seen[-1] == (f"env 'pytest -q {T}'", "/app")
 
 
 def test_tests_added_normalised(log: EventLog) -> None:

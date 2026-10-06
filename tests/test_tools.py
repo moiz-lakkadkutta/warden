@@ -359,3 +359,44 @@ def test_empty_required_strings_rejected(log: EventLog, name: str, args: Any) ->
 def test_no_contree_import() -> None:
     assert "contree" not in inspect.getsource(tools_module)
     assert not [m for m in sys.modules if m.startswith("contree")]
+
+
+class _RecordingBackend:
+    """Records (shell, cwd) of every run; always succeeds with a child checkpoint."""
+
+    def __init__(self) -> None:
+        self.runs: list[tuple[str, str]] = []
+
+    def use(self, ref: str) -> str:
+        return ref
+
+    def run(self, image: Any, *, shell: str, cwd: str, keep: bool, **_: Any) -> Any:
+        self.runs.append((shell, cwd))
+        return "ok", "", 0, (f"{image}+" if keep else None), (f"{image}+" if keep else "")
+
+    def tag(self, image: Any, name: str) -> None:
+        return None
+
+    def uuid_of(self, image: Any) -> str:
+        return str(image)
+
+
+def test_run_shell_wraps_command_and_uses_workdir(log: EventLog) -> None:
+    backend = _RecordingBackend()
+    box = Box(backend, "base", log)
+    d = ToolDispatcher(log, cwd="/src", shell_wrap="with-services sh -c")
+    res = d.dispatch(box, "run_shell", {"command": "pytest -q 'a b.py'", "timeout": 60})
+    assert res.ok
+    assert backend.runs[-1] == ("with-services sh -c 'pytest -q '\"'\"'a b.py'\"'\"''", "/src")
+    # read-only tools are not wrapped (no services needed), but run in the workdir
+    d.dispatch(box, "read_file", {"path": "backend/app/x.py"})
+    assert backend.runs[-1] == ("cat backend/app/x.py", "/src")
+    # event shows the command the model asked for, not the wrapper
+    ev = [e for e in _events(log) if e.data.get("name") == "run_shell"][-1]
+    assert ev.data["args"]["command"] == "pytest -q 'a b.py'"
+
+
+def test_run_shell_without_wrap_is_unchanged(log: EventLog) -> None:
+    backend = _RecordingBackend()
+    ToolDispatcher(log).dispatch(Box(backend, "b", log), "run_shell", {"command": "ls"})
+    assert backend.runs[-1] == ("ls", "/app")

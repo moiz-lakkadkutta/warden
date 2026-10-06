@@ -225,6 +225,7 @@ def run_implementer(
     cost = 0.0
     report: FixReport | None = None
     on_base: dict[str, bool] = {}
+    base_tests: dict[str, set[str]] = {}  # test function names per test file on base
 
     note(
         "start",
@@ -294,7 +295,11 @@ def run_implementer(
                     continue
                 key = _norm(path)
                 if key not in on_base:
-                    on_base[key] = _cat(base, path).ok
+                    base_file = _cat(base, path)
+                    on_base[key] = base_file.ok
+                    base_tests[key] = (
+                        set(_TEST_DEF.findall(base_file.stdout)) if base_file.ok else set()
+                    )
             result = dispatch.dispatch(box, name, args)
             box = result.box
             turns += 1
@@ -304,8 +309,14 @@ def run_implementer(
                 path = str(args["path"])
                 first_write = path if first_write is None else first_write
                 key = _norm(path)
-                if is_test_write and not on_base.get(key, True) and key not in tests_added:
-                    tests_added.append(key)
+                if is_test_write and not on_base.get(key, True):
+                    if key not in tests_added:
+                        tests_added.append(key)
+                elif is_test_write:  # existing file: each new test function is a node id
+                    for name_ in _TEST_DEF.findall(str(args["content"])):
+                        node = f"{key}::{name_}"
+                        if name_ not in base_tests[key] and node not in tests_added:
+                            tests_added.append(node)
 
     if report is None:
         note("budget", tool_turns=turns)
@@ -314,7 +325,7 @@ def run_implementer(
     note("tdd_order", first_write=first_write, test_first=test_first)
     if tests_added:
         cmd = "pytest -q " + " ".join(shlex.quote(p) for p in tests_added)
-        final = box.run(cmd, keep=False, timeout=600)
+        final = dispatch.run(box, cmd, timeout=600)
         note(
             "final_tests",
             tests=list(tests_added),
