@@ -1,18 +1,18 @@
-{"ts":"2026-09-14T18:52:27.064557Z","phase":"hunt","kind":"note","data":{"text":"8 parallel POST /invoices/{id}/finalize with distinct Idempotency-Key"},"ms":null,"usd":null}
-{"ts":"2026-09-14T18:52:27.064786Z","phase":"hunt","kind":"note","data":{"text":"psql: SELECT count(*) FROM voucher WHERE reference_id=$INV → 3 (expected 1)"},"ms":null,"usd":null}
-{"ts":"2026-09-14T18:52:27.064806Z","phase":"hunt","kind":"note","data":{"text":"filed #201 [P0] double-posted voucher on concurrent invoice finalize"},"ms":null,"usd":0.12}
-{"ts":"2026-09-14T18:52:27.065026Z","phase":"hunt","kind":"note","data":{"text":"hunt done → artifacts/issue.json","phase_done":"hunt"},"ms":null,"usd":null}
-{"ts":"2026-09-14T18:52:27.065064Z","phase":"plan","kind":"note","data":{"text":"Lock the invoice row (SELECT … FOR UPDATE) before the status check in finalize().","citations":["https://docs.sqlalchemy.org/en/20/orm/queryguide/query.html#sqlalchemy.orm.Query.with_for_update"]},"ms":null,"usd":0.31}
-{"ts":"2026-09-14T18:52:27.065240Z","phase":"plan","kind":"note","data":{"text":"plan done → artifacts/plan.json","phase_done":"plan"},"ms":null,"usd":null}
-{"ts":"2026-09-14T18:52:27.065298Z","phase":"fix","kind":"sandbox","data":{"shell":"true","exit_code":0,"from":"img-0001","to":"img-0002","cwd":"/app"},"ms":0,"usd":null}
-{"ts":"2026-09-14T18:52:27.065329Z","phase":"fix","kind":"sandbox","data":{"shell":"true","exit_code":0,"from":"img-0002","to":"img-0003","cwd":"/app"},"ms":0,"usd":null}
-{"ts":"2026-09-14T18:52:27.065341Z","phase":"fix","kind":"note","data":{"text":"candidate checkpoint img-0003 after 7 tool turns"},"ms":null,"usd":0.8}
-{"ts":"2026-09-14T18:52:27.065501Z","phase":"fix","kind":"note","data":{"text":"fix done → artifacts/candidate.json","phase_done":"fix"},"ms":null,"usd":null}
-{"ts":"2026-09-14T18:52:27.065530Z","phase":"verify","kind":"sandbox","data":{"shell":"true","exit_code":0,"from":"img-0001","to":"img-0004","cwd":"/app"},"ms":0,"usd":null}
-{"ts":"2026-09-14T18:52:27.065573Z","phase":"verify","kind":"sandbox","data":{"shell":"pytest -q backend/tests/test_finalize_race.py","exit_code":1,"from":"img-0004","to":"img-0004","cwd":"/app"},"ms":0,"usd":null}
-{"ts":"2026-09-14T18:52:27.065605Z","phase":"verify","kind":"sandbox","data":{"shell":"pytest -q backend/tests","exit_code":0,"from":"img-0003","to":"img-0003","cwd":"/app"},"ms":0,"usd":null}
-{"ts":"2026-09-14T18:52:27.065614Z","phase":"verify","kind":"note","data":{"text":"theater: FAIL on unfixed base — as required"},"ms":null,"usd":null}
-{"ts":"2026-09-14T18:52:27.065625Z","phase":"verify","kind":"note","data":{"text":"suite: 214 passed"},"ms":null,"usd":0.15}
-{"ts":"2026-09-14T18:52:27.065776Z","phase":"verify","kind":"note","data":{"text":"verify done → artifacts/verdict.json","phase_done":"verify"},"ms":null,"usd":null}
-{"ts":"2026-09-14T18:52:27.065796Z","phase":"pr","kind":"note","data":{"text":"draft PR body written","label":"PENDING-HUMAN"},"ms":null,"usd":0.04}
-{"ts":"2026-09-14T18:52:27.066345Z","phase":"pr","kind":"note","data":{"text":"pr done → artifacts/pr.json","phase_done":"pr"},"ms":null,"usd":null}
+{"ts":"2026-10-06T11:21:59.418295Z","phase":"hunt","kind":"note","data":{"text":"8 parallel POST /invoices/{id}/finalize with distinct Idempotency-Key"},"ms":null,"usd":null}
+{"ts":"2026-10-06T11:21:59.418578Z","phase":"hunt","kind":"note","data":{"text":"psql: SELECT count(*) FROM voucher WHERE reference_id=$INV → 3 (expected 1)"},"ms":null,"usd":null}
+{"ts":"2026-10-06T11:21:59.418601Z","phase":"hunt","kind":"note","data":{"text":"filed #201 [P0] double-posted voucher on concurrent invoice finalize"},"ms":null,"usd":0.12}
+{"ts":"2026-10-06T11:21:59.418839Z","phase":"hunt","kind":"note","data":{"text":"hunt done → artifacts/issue.json","phase_done":"hunt"},"ms":null,"usd":null}
+{"ts":"2026-10-06T11:21:59.418876Z","phase":"plan","kind":"note","data":{"text":"Lock the invoice row (SELECT … FOR UPDATE) before the status check in finalize().","citations":["https://docs.sqlalchemy.org/en/20/orm/queryguide/query.html#sqlalchemy.orm.Query.with_for_update"]},"ms":null,"usd":0.31}
+{"ts":"2026-10-06T11:21:59.419058Z","phase":"plan","kind":"note","data":{"text":"plan done → artifacts/plan.json","phase_done":"plan"},"ms":null,"usd":null}
+{"ts":"2026-10-06T11:21:59.419127Z","phase":"fix","kind":"sandbox","data":{"shell":"true","exit_code":0,"from":"img-0001","to":"img-0002","cwd":"/app"},"ms":0,"usd":null}
+{"ts":"2026-10-06T11:21:59.419154Z","phase":"fix","kind":"sandbox","data":{"shell":"true","exit_code":0,"from":"img-0002","to":"img-0003","cwd":"/app"},"ms":0,"usd":null}
+{"ts":"2026-10-06T11:21:59.419165Z","phase":"fix","kind":"note","data":{"text":"candidate checkpoint img-0003 after 7 tool turns"},"ms":null,"usd":0.8}
+{"ts":"2026-10-06T11:21:59.419305Z","phase":"fix","kind":"note","data":{"text":"fix done → artifacts/candidate.json","phase_done":"fix"},"ms":null,"usd":null}
+{"ts":"2026-10-06T11:21:59.419334Z","phase":"verify","kind":"sandbox","data":{"shell":"true","exit_code":0,"from":"img-0001","to":"img-0004","cwd":"/app"},"ms":0,"usd":null}
+{"ts":"2026-10-06T11:21:59.419381Z","phase":"verify","kind":"sandbox","data":{"shell":"pytest -q -p no:cacheprovider -rA --tb=short backend/tests/test_finalize_race.py","exit_code":1,"from":"img-0004","to":"img-0004","cwd":"/app"},"ms":0,"usd":null}
+{"ts":"2026-10-06T11:21:59.419411Z","phase":"verify","kind":"sandbox","data":{"shell":"pytest -q backend/tests","exit_code":0,"from":"img-0003","to":"img-0003","cwd":"/app"},"ms":0,"usd":null}
+{"ts":"2026-10-06T11:21:59.419422Z","phase":"verify","kind":"note","data":{"text":"theater: FAIL on unfixed base — as required"},"ms":null,"usd":null}
+{"ts":"2026-10-06T11:21:59.419433Z","phase":"verify","kind":"note","data":{"text":"suite: 214 passed"},"ms":null,"usd":0.15}
+{"ts":"2026-10-06T11:21:59.419593Z","phase":"verify","kind":"note","data":{"text":"verify done → artifacts/verdict.json","phase_done":"verify"},"ms":null,"usd":null}
+{"ts":"2026-10-06T11:21:59.419614Z","phase":"pr","kind":"note","data":{"text":"draft PR body written","label":"PENDING-HUMAN"},"ms":null,"usd":0.04}
+{"ts":"2026-10-06T11:21:59.419991Z","phase":"pr","kind":"note","data":{"text":"pr done → artifacts/pr.json","phase_done":"pr"},"ms":null,"usd":null}
