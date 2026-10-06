@@ -134,13 +134,13 @@ def test_truncation(log: EventLog) -> None:
     img.files["/app/big.txt"] = big.encode()
     img.files["/app/small.txt"] = b"tiny"
     d = ToolDispatcher(log, max_output=1000)
-    res = d.dispatch(box, "read_file", {"path": "big.txt"})
+    res = d.dispatch(box, "run_shell", {"command": "cat big.txt"})
     assert res.truncated is True
-    marker = "\n…[truncated 19000 of 20000 chars]…\n"
+    total = len(big) + len("\n[exit 0]")
+    marker = f"\n…[truncated {total - 1000} of {total} chars]…\n"
     assert marker in res.output
-    assert len(res.output) <= 1000 + len(marker)
+    assert len(res.output) <= 1000 + len(marker)  # shell output keeps head + tail
     assert res.output.startswith(big[:500])
-    assert res.output.endswith(big[-500:])
     small = d.dispatch(box, "read_file", {"path": "small.txt"})
     assert small.truncated is False and small.output == "tiny"
 
@@ -400,3 +400,38 @@ def test_run_shell_without_wrap_is_unchanged(log: EventLog) -> None:
     backend = _RecordingBackend()
     ToolDispatcher(log).dispatch(Box(backend, "b", log), "run_shell", {"command": "ls"})
     assert backend.runs[-1] == ("ls", "/app")
+
+
+def test_read_file_returns_a_16k_file_whole(log: EventLog) -> None:
+    _, box, img = _setup(log)
+    text = "".join(f"line {i} " + "x" * 60 + "\n" for i in range(240))  # ~16.5k chars
+    img.files["/app/svc.py"] = text.encode()
+    res = ToolDispatcher(log).dispatch(box, "read_file", {"path": "svc.py"})
+    assert res.ok and res.truncated is False and res.output == text
+
+
+def test_read_file_pages_by_whole_lines_with_a_continue_hint(log: EventLog) -> None:
+    _, box, img = _setup(log)
+    lines = [f"row {i:03d}\n" for i in range(1, 101)]  # 8 chars each
+    img.files["/app/big.py"] = "".join(lines).encode()
+    d = ToolDispatcher(log, read_limit=200)
+    first = d.dispatch(box, "read_file", {"path": "big.py"})
+    assert first.ok and first.truncated
+    shown = first.output.split("\n…[")[0] + "\n"
+    assert shown == "".join(lines[:25])  # 25 whole lines = 200 chars, never a partial line
+    assert "lines 1-25 of 100" in first.output
+    assert "start_line=26" in first.output
+    nxt = d.dispatch(box, "read_file", {"path": "big.py", "start_line": 26})
+    assert nxt.output.startswith("row 026\n")
+    assert "lines 26-50 of 100" in nxt.output
+    last = d.dispatch(box, "read_file", {"path": "big.py", "start_line": 90})
+    assert last.truncated is False and last.output == "".join(lines[89:])
+    past = d.dispatch(box, "read_file", {"path": "big.py", "start_line": 500})
+    assert past.ok is False and "100 lines" in past.output
+
+
+def test_grep_supports_alternation(log: EventLog) -> None:
+    _, box, img = _setup(log)
+    img.files["/app/src/a.py"] = b"FOO = 1\nBAR = 2\nBAZ = 3\n"
+    hit = ToolDispatcher(log).dispatch(box, "grep", {"pattern": "FOO|BAR", "path": "src"})
+    assert hit.output == "src/a.py:1:FOO = 1\nsrc/a.py:2:BAR = 2\n"

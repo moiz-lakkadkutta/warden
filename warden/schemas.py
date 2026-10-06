@@ -148,17 +148,24 @@ class ListFilesArgs(ToolArgs):
 
 class ReadFileArgs(ToolArgs):
     path: str = Field(
-        min_length=1, description="File to read, relative to /app unless it starts with '/'."
+        min_length=1, description="File to read, relative to the repo root unless absolute."
+    )
+    start_line: int = Field(
+        1, ge=1, description="First line to return (1-based); use it to continue a long file."
     )
 
 
 class GrepArgs(ToolArgs):
-    pattern: str = Field(min_length=1, description="Text pattern to search for (grep -e syntax).")
-    path: str = Field(".", description="Directory or file to search, relative to /app.")
+    pattern: str = Field(
+        min_length=1, description="Extended regex (grep -E): `A|B` matches either."
+    )
+    path: str = Field(".", description="Directory or file to search, relative to the repo root.")
 
 
 class WriteFileArgs(ToolArgs):
-    path: str = Field(min_length=1, description="File to create or replace, relative to /app.")
+    path: str = Field(
+        min_length=1, description="File to create or replace, relative to the repo root."
+    )
     content: str = Field(description="The complete new contents of the file.")
 
 

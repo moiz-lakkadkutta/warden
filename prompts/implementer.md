@@ -18,6 +18,7 @@ acceptance items pass or after the tool-turn budget; report which acceptance ite
 ## Tool rules
 - Every reply is a tool call, never prose; one action per call.
 - `read_file` before `write_file`: you replace the whole file, so start from its current content.
+  Long files arrive in pages; follow the `start_line` hint until you have read every line.
 - Paths are relative to the repo root, exactly as in the plan (e.g. `backend/app/...`);
   commands run there with a 600 s limit and with the database already started.
 

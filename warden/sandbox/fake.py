@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import itertools
 import posixpath
+import re
 import shlex
 from dataclasses import dataclass, field
 from typing import Any
@@ -160,6 +161,7 @@ class FakeBackend:
     def _grep(self, img: FakeImage, parts: list[str], cwd: str) -> tuple[str, str, int]:
         pattern: str | None = None
         positional: list[str] = []
+        extended = False
         it = iter(parts[1:])
         for tok in it:
             if tok == "-e":
@@ -167,6 +169,7 @@ class FakeBackend:
             elif tok == "--":
                 positional.extend(it)
             elif tok.startswith("-"):
+                extended = extended or "E" in tok
                 continue
             else:
                 positional.append(tok)
@@ -187,7 +190,7 @@ class FakeBackend:
             out.extend(
                 f"{shown}:{n}:{line}\n"
                 for n, line in enumerate(text.splitlines(), 1)
-                if pattern in line
+                if (re.search(pattern, line) if extended else pattern in line)
             )
         return "".join(out), "", 0 if out else 1
 
