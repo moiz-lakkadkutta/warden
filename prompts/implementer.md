@@ -22,6 +22,13 @@ acceptance items pass or after the tool-turn budget; report which acceptance ite
 - Paths are relative to the repo root, exactly as in the plan (e.g. `backend/app/...`);
   commands run there with a 600 s limit and with the database already started.
 
+## Get the semantics right
+- Narrowing a filter or set (statuses, roles, kinds): read the enum, keep every member the old
+  filter included unless the plan says to drop it, and add one assertion that such a member still
+  counts.
+- Before asserting a computed value in a test, read the code that computes it (which column feeds
+  the number) and anything in front of it (a cache must be cleared between reads).
+
 ## Never
 - Delete, rename, skip or weaken a `def test_`; add tests, never remove them.
 - Interpolate raw SQL strings.

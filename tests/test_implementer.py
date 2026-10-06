@@ -553,3 +553,31 @@ def test_absolute_workdir_test_path_is_normalised(log: EventLog) -> None:
     script = [turn(tool_call("write_file", path=f"/app/{T}", content=TEST_A)), finish_turn()]
     _, cand = _run(env, script)
     assert cand.tests_added == [T]
+
+
+def test_base_test_file_is_read_in_the_workdir(log: EventLog) -> None:
+    """Regression (A6 run 3): the base copy of an existing test file was read from /app, so
+    with workdir /src the file looked new and was recorded whole instead of as node ids."""
+    from warden.fix.tools import ToolDispatcher
+
+    env = _setup(log)
+    env.image.files["/src/tests/test_old.py"] = b"def test_z():\n    pass\n"
+    grown = "def test_z():\n    pass\n\n\ndef test_y():\n    pass\n"
+    llm = ScriptedLLM(
+        [turn(tool_call("write_file", path="tests/test_old.py", content=grown)), finish_turn()]
+    )
+    cand = run_implementer(
+        llm, env.base, env.plan, log, dispatcher=ToolDispatcher(log, cwd="/src"), max_tool_turns=5
+    )
+    assert cand.tests_added == ["tests/test_old.py::test_y"]
+
+
+def test_scratch_files_outside_the_workdir_are_not_tests(log: EventLog) -> None:
+    env = _setup(log)
+    script = [
+        turn(tool_call("write_file", path=T, content=TEST_A)),
+        turn(tool_call("write_file", path="/tmp/debug_test.py", content="print(1)\n")),
+        finish_turn(),
+    ]
+    _, cand = _run(env, script)
+    assert cand.tests_added == [T]

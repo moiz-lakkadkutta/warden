@@ -99,6 +99,8 @@ def is_test_path(path: str, plan: Plan, root: str = "/app") -> bool:
     """A test file by location (`tests/`), by name (`test_*.py`, `*_test.py`) or by the plan
     (whose tests_to_add may be pytest node ids, `path::test_name`)."""
     p = _norm(path, root)
+    if p.startswith("/"):  # outside the repo (e.g. /tmp/debug_test.py): scratch, not a test
+        return False
     name = posixpath.basename(p)
     return (
         p.startswith("tests/")
@@ -191,8 +193,8 @@ def _charge(res: ChatResult, progress: Progress) -> float:
     return usd
 
 
-def _cat(box: Box, path: str) -> Any:
-    return box.run(f"cat {shlex.quote(path)}", keep=False)
+def _cat(box: Box, path: str, cwd: str) -> Any:
+    return box.run(f"cat {shlex.quote(path)}", cwd=cwd, keep=False)
 
 
 def _step_text(name: str, args: Any, exit_code: int | None) -> str:
@@ -288,7 +290,7 @@ def run_implementer(
             )
             if is_test_write:
                 path = str(args["path"])
-                before = _cat(box, path)
+                before = _cat(box, path, root)
                 removed = removed_tests(before.stdout, str(args["content"])) if before.ok else []
                 if removed:
                     turns += 1
@@ -303,7 +305,7 @@ def run_implementer(
                     continue
                 key = _norm(path, root)
                 if key not in on_base:
-                    base_file = _cat(base, path)
+                    base_file = _cat(base, path, root)
                     on_base[key] = base_file.ok
                     base_tests[key] = (
                         set(_TEST_DEF.findall(base_file.stdout)) if base_file.ok else set()
