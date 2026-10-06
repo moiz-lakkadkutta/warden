@@ -15,5 +15,9 @@ names, and documentation search results.
   results. If none applies, return an empty `citations` list rather than inventing a URL.
 - `risk_class`: money, tax, schema, security, concurrency, or none (several may apply).
 - `acceptance`: checks a verifier can run, including at least one regression guard.
+- Preserve scope: when the fix narrows a filter, set or condition, list every member that was
+  included before and must STILL be included (e.g. each status value), add a test that one of
+  them still counts, and say so in `acceptance`. Never reuse an existing constant for a new
+  purpose unless its members are exactly the ones you just listed.
 
 Output only the JSON schema provided.

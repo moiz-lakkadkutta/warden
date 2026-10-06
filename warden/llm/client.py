@@ -22,6 +22,15 @@ if TYPE_CHECKING:
 
 T = TypeVar("T", bound=BaseModel)
 
+# Completion budgets per role. Reasoning tokens count against max_tokens, and Ultra used up the
+# server default (8192) before finishing a Plan's JSON (A5). None = server default.
+MAX_TOKENS: dict[Role, int | None] = {
+    Role.PLANNER: 16384,
+    Role.VERDICT: 16384,
+    Role.IMPLEMENTER: None,
+    Role.TOOLS: None,
+}
+
 
 @dataclass
 class ChatResult:
@@ -64,10 +73,14 @@ class LLM:
         response_format: dict[str, Any] | None = None,
         tools: list[dict[str, Any]] | None = None,
         temperature: float = 0.1,
+        max_tokens: int | None = None,
     ) -> ChatResult:
         model = self._s.model_for(role)
         self._meter.check(phase)
         kwargs: dict[str, Any] = {"model": model, "messages": messages, "temperature": temperature}
+        budget = max_tokens if max_tokens is not None else MAX_TOKENS.get(role)
+        if budget is not None:
+            kwargs["max_tokens"] = budget
         if response_format:
             kwargs["response_format"] = response_format
         if tools:
@@ -114,6 +127,7 @@ class LLM:
         schema: type[T],
         *,
         max_retries: int = 2,
+        max_tokens: int | None = None,
     ) -> T:
         """JSON-schema constrained output with a documented fallback ladder.
 
@@ -137,7 +151,9 @@ class LLM:
         last_err: Exception | None = None
         for attempt in range(max_retries + 1):
             fmt = strict_fmt if attempt < max_retries else {"type": "json_object"}
-            result = self._complete(role, phase, messages, response_format=fmt)
+            result = self._complete(
+                role, phase, messages, response_format=fmt, max_tokens=max_tokens
+            )
             try:
                 return schema.model_validate_json(result.content or "")
             except ValidationError as err:
