@@ -68,18 +68,13 @@ Gate on main: ruff ✓ format ✓ mypy --strict ✓ **241 passed**. Token Factor
 Acceptance: `warden run --issue 196 --at 43f3851^` from a clean shell produces a Verdict with the
 theater row, under $3, unattended.
 
-### 2. B4-live: the gate on the candidate
+### 2. B4-live: ✓ done (2026-10-10, `07622b9`, [spike-B4.md](spike-B4.md))
 
-`warden/verify/gate.py:GateCommands` still has session-1 guesses, which don't match fabric-base:
-
-| Command | Problem |
-|---|---|
-| `mypy .` / `ruff check .` / `ruff format --check .` | must run in `backend/`, i.e. `cd backend && …` from `/src` (Fabric's `make lint` does exactly this) |
-| `createdb warden_gate`, `DATABASE_URL=postgresql://localhost/warden_gate` | needs `-h 127.0.0.1 -U postgres` and the asyncpg URL form. Better: `CREATE DATABASE … TEMPLATE test` |
-| `openapi_diff` on `openapi.json` | the snapshot is `frontend/scripts/openapi-snapshot.json`, and `make openapi-snapshot` also regenerates FE types (pnpm is probably **not** in the image) — check first |
-| every command | must go through the service wrap and the workdir, the way `ToolDispatcher.run` does |
-
-Run the full suite once on the A6 candidate: expect 1787 + 3 passed.
+`run_gate(commands=PROFILES[s.gate_profile], cwd=s.workdir, wrap=s.shell_wrap)` on the A6
+candidate gives suite 1509 passed (= Fabric CI on #220), mypy ✓, **ruff ✗** (= CI), alembic 1 head
+✓, no OpenAPI drift, and FE codegen not verified. Next: call it from the live `verify` step, and
+fill `Verdict` from `verdict_fields()` + `not_verified`. `evidence_table` must render "not run" /
+"not verified" rows honestly.
 
 ### 3. B2 criterion: plans name the right files on 3 closed issues
 
