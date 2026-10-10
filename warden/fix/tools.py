@@ -287,7 +287,10 @@ class ToolDispatcher:
                 return self._finish(box, name, True, "(no matches)", 1, t0)
             return self._read(box, name, res, t0)
         if isinstance(parsed, WriteFileArgs):
-            data = parsed.content.encode()
+            content = parsed.content
+            if content and not content.endswith("\n"):  # models drop it; linters flag W292
+                content += "\n"
+            data = content.encode()
             if parsed.path.startswith("/"):
                 child = box.copy_in({parsed.path.lstrip("/"): data}, cwd="/")
             else:

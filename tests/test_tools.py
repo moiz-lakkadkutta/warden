@@ -104,7 +104,7 @@ def test_write_file_forks(log: EventLog) -> None:
     assert backend.images[child.uuid].files["/app/src/new.py"] == b"x = 1\n"
     absolute = d.dispatch(parent, "write_file", {"path": "/etc/warden.cfg", "content": "k=v"})
     assert absolute.ok and absolute.box.uuid != parent.uuid
-    assert backend.images[absolute.box.uuid].files["/etc/warden.cfg"] == b"k=v"
+    assert backend.images[absolute.box.uuid].files["/etc/warden.cfg"] == b"k=v\n"
 
 
 def test_run_shell_happy(log: EventLog) -> None:
@@ -435,3 +435,16 @@ def test_grep_supports_alternation(log: EventLog) -> None:
     img.files["/app/src/a.py"] = b"FOO = 1\nBAR = 2\nBAZ = 3\n"
     hit = ToolDispatcher(log).dispatch(box, "grep", {"pattern": "FOO|BAR", "path": "src"})
     assert hit.output == "src/a.py:1:FOO = 1\nsrc/a.py:2:BAR = 2\n"
+
+
+def test_write_file_adds_the_missing_final_newline(log: EventLog) -> None:
+    """Regression (Fabric#220): Super's whole-file rewrites dropped the trailing newline and the
+    target repo's `ruff check` (W292) failed on both files."""
+    backend, box, _ = _setup(log)
+    d = ToolDispatcher(log)
+    res = d.dispatch(box, "write_file", {"path": "svc.py", "content": "__all__ = ['x']"})
+    assert backend.images[res.box.uuid].files["/app/svc.py"] == b"__all__ = ['x']\n"
+    kept = d.dispatch(box, "write_file", {"path": "a.py", "content": "x = 1\n"})
+    assert backend.images[kept.box.uuid].files["/app/a.py"] == b"x = 1\n"
+    empty = d.dispatch(box, "write_file", {"path": "__init__.py", "content": ""})
+    assert backend.images[empty.box.uuid].files["/app/__init__.py"] == b""

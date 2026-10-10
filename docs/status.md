@@ -19,6 +19,18 @@ Pieces of B2, B3 and C1 landed along the way:
 
 Gate on main: ruff ✓ format ✓ mypy --strict ✓ **241 passed**. Token Factory spend so far ≈ **$1**.
 
+## B5 live: fix branches on Fabric (2026-10-10)
+
+- `warden/integrate/branch.py`: the patch leaves the sandbox via `git format-patch`, and the host
+  applies it in a cached clone and pushes it (no token in any box). Branches are
+  `warden/fix-<issue>-<run_id>`, plus `warden/base-<sha7>` for replays.
+- **[Fabric-Inventory#220](https://github.com/moiz-lakkadkutta/Fabric-Inventory/pull/220)**: a draft
+  replay of #196, labelled `PENDING-HUMAN` (the label was created on Fabric). Fabric's CI on it:
+  backend pytest ✓, E2E ✓, frontend ✓, OpenAPI drift ✓, Docker build ✓, **backend lint ✗**
+  (ruff W292: no trailing newline in both files). Fixed in Warden's `write_file`; the PR itself
+  is left as-is, as evidence of the gap Warden's own gate (B4-live) must catch.
+- Moiz's call: fix branches and draft PRs go to Fabric itself.
+
 ## Infra state (verified 2026-10-10)
 
 - **GHCR:** `ghcr.io/moiz-lakkadkutta/warden/fabric-base:{8cfc493,latest}`, public, digest
@@ -48,8 +60,8 @@ Gate on main: ruff ✓ format ✓ mypy --strict ✓ **241 passed**. Token Factor
   4. Keep the candidate box alive for verify: `Box.from_ref(backend, cand.image_uuid, ...)`.
 - **verify:** theater from `spikes/a7_theater.py`, plus the gate (step 2). Fill in `Verdict`:
   set `theater_failed_on_base`, and turn `inconclusive` into a concern, never a PASS.
-- **pr:** `integrate/pr.py:open_draft_pr` exists (B5, offline-tested). Wiring it needs a branch
-  pushed somewhere: decide whether that's Fabric itself or a scratch fork (Moiz's call).
+- **pr:** `export_patch` → `push_fix_branch` → `open_draft_pr`, as in `spikes/b5_push_fix.py`.
+  The PR body must only claim checks that ran; `evidence_table` can't express "gate not run" yet.
 - Add `warden run --issue N --at <rev>` for replays. Planner context uses `rev=`; fix/verify check
   out the rev.
 

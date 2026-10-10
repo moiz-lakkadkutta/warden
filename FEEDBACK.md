@@ -74,6 +74,9 @@ Every entry: date · tool · what happened · numbers · what would have helped.
 - 2026-10-06 · A6 · Super's habits worth knowing: it reaches for `cd /app` (a Docker convention)
   even when told nothing about /app, and it re-reads a file it cannot see whole rather than
   writing blind (good). Once the workdir is stated in the system prompt it never `cd`s.
+- 2026-10-10 · B5 · Super's whole-file rewrites (`write_file` content) end without a trailing
+  newline. On Fabric#220 that was the ONLY CI failure (ruff W292 in both files; pytest, E2E,
+  OpenAPI drift, frontend all green). Fixed deterministically in Warden's write_file.
 - (fill in after Phase B3) Lightning as a tool router: turn count, wrong-tool rate.
 
 ## Nebius Serverless
