@@ -48,7 +48,18 @@ Gate on main: ruff ✓ format ✓ mypy --strict ✓ **241 passed**. Token Factor
 
 ## Start here next session
 
-### 1. B6-live: wired ✓ (`3849a8c`); acceptance run blocked by Token Factory billing
+### 1. B6-live: first full unattended run ✓, verdict FAIL (ruff); lint fix landed
+
+Run `20261010-111217-7c89` (after "Switch to paid usage"): 16 min, **$0.24** by Warden's meter,
+capped at $1. Theater ✓ (the repro fails on base), suite 1507 passed, mypy ✓, alembic ✓, no
+drift. **ruff ✗**: 2× F841 unused variables plus formatting, all in the model's test. So no PR was
+opened, which is correct. Fix: profile `lint` (the implementer must run it before `finish`) and
+`autofix` (`ruff format` + `ruff check --fix`, run by Warden after `finish`); gate output is saved
+to `artifacts/gate.txt`. **Next:** one more `warden run --issue 196 --at 43f3851^ --yes` (≈ $0.25,
+needs Moiz's OK; the account is on paid usage now). A PASS opens the draft PR, which is the
+Phase B exit.
+
+### 1a. Earlier notes: blocked by Token Factory billing
 
 `warden run --issue 196 --at 43f3851^ --yes` (run `20261010-111217-7c89`) fetched the issue, then
 got **HTTP 402 "budget exhausted"** on the first Lightning call. A 402 now ends as a clean exit 4

@@ -387,11 +387,13 @@ def _live_fix(ctx: StepContext, plan: Plan) -> Candidate:
     from warden.fix.tools import ToolDispatcher
     from warden.llm.client import LLM
     from warden.llm.cost import CostMeter
+    from warden.verify.gate import PROFILES
 
     s = ctx.settings
     base = _base_box(ctx, "fix")
     llm = LLM(s, CostMeter(cap_usd=s.max_usd_per_issue - ctx.spent_usd()), ctx.log)
     dispatcher = ToolDispatcher(ctx.log, cwd=s.workdir, shell_wrap=s.shell_wrap)
+    profile = PROFILES[s.gate_profile]
     cand = run_implementer(
         llm,
         base,
@@ -400,6 +402,8 @@ def _live_fix(ctx: StepContext, plan: Plan) -> Candidate:
         dispatcher=dispatcher,
         max_tool_turns=s.max_tool_turns,
         progress=ctx.progress,
+        lint=profile.lint,
+        autofix=profile.autofix,
     )
     ctx.progress.step(
         f"{'done' if cand.done else 'blocked'} in {cand.tool_turns} turns, "
@@ -438,6 +442,13 @@ def _live_verify(ctx: StepContext, plan: Plan, cand: Candidate) -> Verdict:
         cwd=s.workdir,
         wrap=s.shell_wrap,
         timeout=1800,
+    )
+    ctx.log.artifact(
+        "gate.txt",
+        "\n\n".join(
+            f"## {st.name} (exit {st.exit_code}, {st.ms / 1000:.1f} s)\n$ {st.shell}\n{st.tail}"
+            for st in gate.steps
+        ),
     )
     verdict = decide(cand, theater, gate)
     ctx.progress.step(f"verdict: {verdict.decision}")

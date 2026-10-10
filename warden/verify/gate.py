@@ -42,6 +42,11 @@ class GateCommands:
     openapi_diff: str = "git diff --exit-code --quiet -- openapi.json"
     # Checks this profile cannot run in the base image; reported as "not verified", never green.
     not_covered: tuple[str, ...] = ()
+    # Shown to the implementer to run before `finish`; "" = none.
+    lint: str = ""
+    # Run by Warden on the candidate after the implementer finishes (formatter + safe fixes,
+    # like a pre-commit hook); its checkpoint becomes the candidate. "" = none.
+    autofix: str = ""
 
 
 DEFAULT_COMMANDS = GateCommands()
@@ -62,6 +67,8 @@ FABRIC_COMMANDS = GateCommands(
     openapi_snapshot="cd backend && python ../frontend/scripts/dump-openapi.py --out /tmp/openapi-fresh.json",
     openapi_diff="diff -q frontend/scripts/openapi-snapshot.json /tmp/openapi-fresh.json",
     not_covered=("frontend type codegen drift (pnpm gen:types; no node in fabric-base)",),
+    lint="cd backend && ruff check . && ruff format --check .",
+    autofix="cd backend && ruff format . && ruff check --fix .",
 )
 
 PROFILES: dict[str, GateCommands] = {"generic": DEFAULT_COMMANDS, "fabric": FABRIC_COMMANDS}

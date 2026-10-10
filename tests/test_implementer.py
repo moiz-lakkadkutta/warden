@@ -581,3 +581,36 @@ def test_scratch_files_outside_the_workdir_are_not_tests(log: EventLog) -> None:
     ]
     _, cand = _run(env, script)
     assert cand.tests_added == [T]
+
+
+def test_system_message_names_the_lint_command(log: EventLog) -> None:
+    from warden.fix.implementer import build_messages
+
+    env = _setup(log)
+    system = build_messages("P", env.plan, 5, workdir="/src", lint="cd backend && ruff check .")[0][
+        "content"
+    ]
+    assert "Before `finish`, run `cd backend && ruff check .`" in system
+
+
+def test_autofix_runs_once_after_finish_and_the_candidate_is_its_checkpoint(log: EventLog) -> None:
+    from warden.fix.tools import ToolDispatcher
+
+    env = _setup(log)
+    seen: list[str] = []
+    real_run = env.backend.run
+
+    def spy(image, *, shell, cwd, **kw):  # type: ignore[no-untyped-def]
+        seen.append(shell)
+        return real_run(image, shell=shell, cwd=cwd, **kw)
+
+    env.backend.run = spy  # type: ignore[method-assign]
+    d = ToolDispatcher(log)
+    llm = ScriptedLLM([turn(tool_call("write_file", path=T, content=TEST_A)), finish_turn()])
+    cand = run_implementer(
+        llm, env.base, env.plan, log, dispatcher=d, max_tool_turns=5, autofix="true"
+    )
+    # write_file's copy_in also runs `true`; autofix is the command right before the final tests
+    assert seen[-1].startswith("pytest") and seen[-2] == "true"
+    assert _note(log, "autofix")["exit_code"] == 0
+    assert cand.image_uuid == _note(log, "autofix")["image_uuid"]

@@ -213,12 +213,12 @@ class ToolDispatcher:
         """The workdir every tool runs in (the repo root inside the image)."""
         return self._cwd
 
-    def run(self, box: Box, command: str, *, timeout: int = 600) -> RunResult:
-        """A command outside the model's tool budget (e.g. the final test run), with the same
-        workdir and service wrapper as run_shell; never forks."""
+    def run(self, box: Box, command: str, *, timeout: int = 600, keep: bool = False) -> RunResult:
+        """A command outside the model's tool budget (final test run, autofix), with the same
+        workdir and service wrapper as run_shell; forks only with keep=True."""
         if self._shell_wrap:
             command = f"{self._shell_wrap} {shlex.quote(command)}"
-        return box.run(command, cwd=self._cwd, timeout=timeout, keep=False)
+        return box.run(command, cwd=self._cwd, timeout=timeout, keep=keep)
 
     def dispatch(self, box: Box, name: str, args: Any) -> ToolResult:
         """`args` is the parsed dict from `ChatResult.tool_calls[i]["arguments"]`; never raises on

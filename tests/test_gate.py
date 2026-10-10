@@ -229,3 +229,12 @@ def test_not_covered_checks_surface_in_the_result(log: EventLog) -> None:
     result = run_gate(Box(_Recorder(), "c", log), log, commands=PROFILES["fabric"])
     assert result.not_verified == list(PROFILES["fabric"].not_covered)
     assert run_gate(Box(_Recorder(), "c", log), log).not_verified == []
+
+
+def test_fabric_profile_has_lint_and_autofix() -> None:
+    from warden.verify.gate import PROFILES
+
+    f = PROFILES["fabric"]
+    assert f.lint == "cd backend && ruff check . && ruff format --check ."
+    assert f.autofix == "cd backend && ruff format . && ruff check --fix ."
+    assert PROFILES["generic"].autofix == ""

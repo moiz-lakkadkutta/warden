@@ -122,7 +122,7 @@ def removed_tests(before: str, after: str) -> list[str]:
 
 
 def build_messages(
-    prompt_text: str, plan: Plan, max_tool_turns: int, *, workdir: str = "/app"
+    prompt_text: str, plan: Plan, max_tool_turns: int, *, workdir: str = "/app", lint: str = ""
 ) -> list[dict[str, Any]]:
     tools = "\n".join(
         f"- {t['function']['name']} — {t['function']['description']}" for t in ALL_TOOLS
@@ -132,7 +132,13 @@ def build_messages(
         f"Working directory: {workdir} (the repo root). Every command already runs there and "
         "every path is relative to it, so never `cd` (other directories such as /app are not "
         "the repo).\n"
-        f"Budget: {max_tool_turns} tool turns\n"
+        + (
+            f"Before `finish`, run `{lint}` and fix everything it reports (unused variables "
+            "included); the target repo's CI rejects any lint error.\n"
+            if lint
+            else ""
+        )
+        + f"Budget: {max_tool_turns} tool turns\n"
     )
 
     def block(title: str, items: list[str]) -> str:
@@ -215,6 +221,8 @@ def run_implementer(
     dispatcher: ToolDispatcher | None = None,
     max_tool_turns: int,
     progress: Progress | None = None,
+    lint: str = "",
+    autofix: str = "",
 ) -> Candidate:
     """Drive the implementer over `base` until `finish` or the tool-turn budget; return the
     Candidate whose `image_uuid` is the last checkpoint. A "turn" is one model action: a
@@ -227,7 +235,7 @@ def run_implementer(
 
     prompt_text = PROMPT_PATH.read_text(encoding="utf-8")
     root = dispatch.cwd
-    messages = build_messages(prompt_text, plan, max_tool_turns, workdir=root)
+    messages = build_messages(prompt_text, plan, max_tool_turns, workdir=root, lint=lint)
     box = base
     turns = 0
     tests_added: list[str] = []
@@ -331,6 +339,11 @@ def run_implementer(
     if report is None:
         note("budget", tool_turns=turns)
         hooks.step(f"tool budget exhausted after {turns} turns")
+    if autofix and first_write is not None:
+        fixed = dispatch.run(box, autofix, timeout=600, keep=True)
+        if fixed.box is not None:
+            box = fixed.box
+        note("autofix", command=autofix, exit_code=fixed.exit_code, image_uuid=box.uuid)
     test_first = first_write is not None and is_test_path(first_write, plan, root)
     note("tdd_order", first_write=first_write, test_first=test_first)
     if tests_added:
