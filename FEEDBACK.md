@@ -45,6 +45,11 @@ Every entry: date · tool · what happened · numbers · what would have helped.
   and project, and the API answers `403 You do not have permission to perform this action`. That
   read like a permissions/beta problem for 20 minutes. → fail client-side with "NEBIUS_API_KEY not
   set", or answer 401 "invalid token".
+- 2026-10-10 · SDK · `images.oci("docker://ghcr.io/x/y:TAG")` resolves an existing Sandboxes image
+  by that tag before importing, so after re-pushing the same registry tag it silently returns the
+  OLD import (0.5 s, old uuid) instead of the new content. Digest refs (`@sha256:…`) are rejected as
+  a "Bad tag format". `images.import_from(ref, tag=new)` forces a fresh import (54.9 s for 633 MB).
+  → resolve by registry digest, or document that `oci()` is cache-by-tag and how to refresh.
 
 ## Token Factory inference
 
