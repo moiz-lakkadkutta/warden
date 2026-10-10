@@ -10,6 +10,7 @@ result maps 1:1 onto the five deterministic `Verdict` fields.
 from __future__ import annotations
 
 import re
+import shlex
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -39,9 +40,31 @@ class GateCommands:
     alembic_heads: str = "alembic heads"
     openapi_snapshot: str = "make openapi-snapshot"
     openapi_diff: str = "git diff --exit-code --quiet -- openapi.json"
+    # Checks this profile cannot run in the base image; reported as "not verified", never green.
+    not_covered: tuple[str, ...] = ()
 
 
 DEFAULT_COMMANDS = GateCommands()
+
+# Fabric-Inventory, mirroring its CI (`make lint`, the openapi-drift job) inside fabric-base:
+# run from the repo root, backend tooling from backend/, DB on 127.0.0.1 as postgres.
+# No command may pipe: `x | tail` exits with tail's status and would hide a red step.
+_FABRIC_DB = "postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/warden_gate"
+FABRIC_COMMANDS = GateCommands(
+    suite="cd backend && pytest -q -p no:cacheprovider",
+    mypy="cd backend && mypy .",
+    ruff_check="cd backend && ruff check .",
+    ruff_format="cd backend && ruff format --check .",
+    db_create="psql -h 127.0.0.1 -U postgres -qc 'CREATE DATABASE warden_gate'",
+    alembic_upgrade="cd backend && alembic upgrade head",
+    alembic_env={"DATABASE_URL": _FABRIC_DB, "MIGRATION_DATABASE_URL": _FABRIC_DB},
+    alembic_heads="cd backend && alembic heads",
+    openapi_snapshot="cd backend && python ../frontend/scripts/dump-openapi.py --out /tmp/openapi-fresh.json",
+    openapi_diff="diff -q frontend/scripts/openapi-snapshot.json /tmp/openapi-fresh.json",
+    not_covered=("frontend type codegen drift (pnpm gen:types; no node in fabric-base)",),
+)
+
+PROFILES: dict[str, GateCommands] = {"generic": DEFAULT_COMMANDS, "fabric": FABRIC_COMMANDS}
 
 
 @dataclass(frozen=True)
@@ -66,6 +89,7 @@ class GateResult:
     openapi_drift: bool
     steps: tuple[GateStep, ...]
     migration_roundtrip: bool | None = None  # C3 fills it; None = not run
+    not_verified: list[str] = field(default_factory=list)
 
     @property
     def suite_ok(self) -> bool:
@@ -130,13 +154,16 @@ def run_gate(
     commands: GateCommands = DEFAULT_COMMANDS,
     cwd: str = "/app",
     timeout: int = 900,
+    wrap: str = "",
 ) -> GateResult:
-    """Run every gate command on disposable forks of `candidate`; never raises on a red command."""
+    """Run every gate command on disposable forks of `candidate`; never raises on a red command.
+    `wrap` (e.g. `with-services sh -c`) prefixes every command; steps record the plain one."""
     t0 = time.perf_counter()
     steps: list[GateStep] = []
 
     def step(name: str, box: Box, shell: str, **kw: Any) -> RunResult:
-        res = box.run(shell, cwd=cwd, **kw)
+        command = f"{wrap} {shlex.quote(shell)}" if wrap else shell
+        res = box.run(command, cwd=cwd, **kw)
         tail = (res.stdout + res.stderr)[-_TAIL:]
         steps.append(GateStep(name, shell, res.exit_code, res.ms, tail))
         return res
@@ -168,6 +195,7 @@ def run_gate(
         alembic_single_head=upgrade.ok and count_heads(heads.stdout) == 1,
         openapi_drift=not snapshot.ok or not diff.ok,
         steps=tuple(steps),
+        not_verified=list(c.not_covered),
     )
     log.emit(
         "verify",

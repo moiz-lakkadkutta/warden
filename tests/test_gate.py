@@ -159,3 +159,73 @@ def test_parse_suite_ignores_counts_outside_summary_line() -> None:
 @pytest.mark.parametrize("stdout", ["", "no tests ran in 0.01s\n", "Traceback: ImportError\n"])
 def test_parse_suite_empty_when_no_counts(stdout: str) -> None:
     assert parse_suite(stdout) == {}
+
+
+class _Recorder:
+    """Every command succeeds; records (shell, cwd, env, keep). Kept runs fork."""
+
+    def __init__(self) -> None:
+        self.runs: list[dict[str, object]] = []
+
+    def use(self, ref: str) -> str:
+        return ref
+
+    def run(
+        self, image: object, *, shell: str, cwd: str, keep: bool, env: object = None, **_: object
+    ) -> object:
+        self.runs.append({"shell": shell, "cwd": cwd, "env": env, "keep": keep})
+        out = "f2_ap_payment_schema (head)\n" if "heads" in shell else "3 passed in 0.5s\n"
+        return out, "", 0, (f"{image}+" if keep else None), (f"{image}+" if keep else "")
+
+    def tag(self, image: object, name: str) -> None:
+        return None
+
+    def uuid_of(self, image: object) -> str:
+        return str(image)
+
+
+def test_wrap_and_workdir_apply_to_every_step_but_steps_record_the_plain_command(
+    log: EventLog,
+) -> None:
+    from warden.verify.gate import PROFILES
+
+    rec = _Recorder()
+    result = run_gate(
+        Box(rec, "cand", log),
+        log,
+        commands=PROFILES["fabric"],
+        cwd="/src",
+        wrap="with-services sh -c",
+    )
+    assert result.ok
+    assert all(r["cwd"] == "/src" for r in rec.runs)
+    assert all(str(r["shell"]).startswith("with-services sh -c '") for r in rec.runs)
+    suite = next(s for s in result.steps if s.name == "suite")
+    assert suite.shell == "cd backend && pytest -q -p no:cacheprovider"
+
+
+def test_fabric_profile_matches_fabric_ci() -> None:
+    from warden.verify.gate import PROFILES
+
+    f = PROFILES["fabric"]
+    assert f.mypy == "cd backend && mypy ."
+    assert f.ruff_check == "cd backend && ruff check ."
+    assert f.ruff_format == "cd backend && ruff format --check ."
+    assert "127.0.0.1" in f.db_create and "-U postgres" in f.db_create
+    url = "postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/warden_gate"
+    assert f.alembic_env == {"DATABASE_URL": url, "MIGRATION_DATABASE_URL": url}
+    assert f.openapi_snapshot.endswith("dump-openapi.py --out /tmp/openapi-fresh.json")
+    assert (
+        f.openapi_diff == "diff -q frontend/scripts/openapi-snapshot.json /tmp/openapi-fresh.json"
+    )
+    for cmd in (f.suite, f.mypy, f.ruff_check, f.ruff_format, f.alembic_upgrade, f.openapi_diff):
+        assert "|" not in cmd  # a pipe would hide the exit code (gate probe, 2026-10-10)
+    assert f.not_covered  # FE type codegen needs pnpm, absent from fabric-base
+
+
+def test_not_covered_checks_surface_in_the_result(log: EventLog) -> None:
+    from warden.verify.gate import PROFILES
+
+    result = run_gate(Box(_Recorder(), "c", log), log, commands=PROFILES["fabric"])
+    assert result.not_verified == list(PROFILES["fabric"].not_covered)
+    assert run_gate(Box(_Recorder(), "c", log), log).not_verified == []

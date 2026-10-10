@@ -138,6 +138,15 @@ def doctor(
             "set WARDEN_WORKDIR to the absolute repo root inside the base image",
         )
     )
+    from warden.verify.gate import PROFILES
+
+    checks.append(
+        (
+            f"WARDEN_GATE_PROFILE ({s.gate_profile})",
+            s.gate_profile in PROFILES,
+            f"set WARDEN_GATE_PROFILE to one of: {', '.join(PROFILES)}",
+        )
+    )
     checks.append((".env not tracked by git", not _env_tracked(), "git rm --cached .env"))
 
     if live:
