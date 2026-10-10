@@ -365,7 +365,8 @@ def _live_plan(ctx: StepContext, ref: IssueRef) -> Plan:
     s = ctx.settings
     # A replay hides comments: on a closed issue they often hold the human's plan.
     issue = fetch_issue(s.target_repo, ref.issue, include_comments=ctx.at_rev is None)
-    llm = LLM(s, CostMeter(cap_usd=s.max_usd_per_issue - ctx.spent_usd()), ctx.log)
+    meter = CostMeter(cap_usd=s.max_usd_per_issue - ctx.spent_usd())
+    llm = LLM(s, meter, ctx.log)
     box = open_base(s, ctx.log, phase="plan")
     tav = tavily_client(s.tavily_api_key)
     plan = plan_issue(
@@ -378,6 +379,7 @@ def _live_plan(ctx: StepContext, ref: IssueRef) -> Plan:
         log=ctx.log,
         prompt=_prompt("planner.md"),
     )
+    ctx.progress.cost(meter.spent_usd)  # the implementer reports its own; the planner doesn't
     ctx.progress.step(f"{len(plan.files_to_touch)} files, {len(plan.citations)} citations")
     return plan
 

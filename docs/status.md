@@ -48,18 +48,27 @@ Gate on main: ruff ✓ format ✓ mypy --strict ✓ **241 passed**. Token Factor
 
 ## Start here next session
 
-### 1. B6-live: first full unattended run ✓, verdict FAIL (ruff); lint fix landed
+### 1. B6-live: ✓ Phase B exit (2026-10-10). PASS, draft PR opened unattended
 
-Run `20261010-111217-7c89` (after "Switch to paid usage"): 16 min, **$0.24** by Warden's meter,
-capped at $1. Theater ✓ (the repro fails on base), suite 1507 passed, mypy ✓, alembic ✓, no
-drift. **ruff ✗**: 2× F841 unused variables plus formatting, all in the model's test. So no PR was
-opened, which is correct. Fix: profile `lint` (the implementer must run it before `finish`) and
-`autofix` (`ruff format` + `ruff check --fix`, run by Warden after `finish`); gate output is saved
-to `artifacts/gate.txt`. **Next:** one more `warden run --issue 196 --at 43f3851^ --yes` (≈ $0.25,
-needs Moiz's OK; the account is on paid usage now). A PASS opens the draft PR, which is the
-Phase B exit.
+Run `20261010-123442-279b`: `warden run --issue 196 --at 43f3851^ --yes`, capped at $1.
+- **24:40 wall clock, $0.17** by Warden's meter. Plan $0.02; fix $0.155 over 20 Super calls and
+  19 turns.
+- The implementer ran `ruff check` before `finish`, and autofix left nothing for the gate to flag.
+- Theater: the repro **FAILS on the unfixed base**. Gate: suite 1508 passed, mypy ✓, ruff ✓, one
+  alembic head, no OpenAPI drift. FE codegen is listed as not verified.
+- Verdict **PASS** → pushed `warden/fix-196-20261010-123442-279b` onto `warden/base-fb19cde` →
+  **[Fabric-Inventory#221](https://github.com/moiz-lakkadkutta/Fabric-Inventory/pull/221)**
+  (draft, `PENDING-HUMAN`, +106/−3, 2 files).
+- Paid spend so far: $0.24 (run `…-111217-7c89`, FAIL on ruff) + $0.17 = **$0.41** by Warden's
+  meter. Still to do: compare with the Token Factory console (it showed $10.00 before the first
+  paid run).
+- Fixed after the run: the `Total` line showed $0.15 because the plan step never reported its
+  cost to the progress line.
 
-### 1a. Earlier notes: blocked by Token Factory billing
+**Next (each paid run needs Moiz's OK):** B2 criterion on two more #212 issues, then C5/C6
+Hunter, the D3 SWE-rebench harness, and E3/E4 console + README.
+
+### 1a. Earlier notes: blocked by Token Factory billing (resolved)
 
 `warden run --issue 196 --at 43f3851^ --yes` (run `20261010-111217-7c89`) fetched the issue, then
 got **HTTP 402 "budget exhausted"** on the first Lightning call. A 402 now ends as a clean exit 4
