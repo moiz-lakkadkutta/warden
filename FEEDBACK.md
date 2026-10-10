@@ -65,6 +65,11 @@ Every entry: date · tool · what happened · numbers · what would have helped.
   so far, so either the promo credits were not applied to this project or real prices differ a lot.
   There is no API to read the remaining balance before a run. → expose a balance/usage endpoint
   (or a response header) so agents can stop before a 402 instead of at it.
+- 2026-10-10 · billing · root cause of the 402 above: the console showed **$10.00 account balance**
+  while the API said "You have exhausted your budget". The real state was "Trial ended. Usage
+  stopped based on your after-trial preference", fixed by "Switch to paid usage". The error text
+  points at money, the cause was a trial-state switch. → return a distinct error
+  (`trial_ended: switch to paid usage`) with a console link.
 
 ## Nemotron models
 
