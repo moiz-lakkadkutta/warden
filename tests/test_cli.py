@@ -365,3 +365,21 @@ def test_run_at_records_the_replay_commit(tmp_path: Path) -> None:
     manifest = json.loads((tmp_path / "runs" / run_id / "run.json").read_text())
     assert manifest == {"mode": "live", "issue": 196, "at": "43f3851^"}
     assert "--at" in _invoke("run", "--help").stdout
+
+
+def test_provider_budget_error_is_a_clean_exit_4(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import warden.pipeline as pipeline
+    from warden.llm.client import ProviderBudgetError
+
+    def plan(*_: object) -> object:
+        raise ProviderBudgetError("Token Factory budget exhausted (HTTP 402)", fix="add funds")
+
+    monkeypatch.setattr(pipeline, "_live_plan", plan)
+    creds = {"NEBIUS_API_KEY": "x", "CONTREE_BASE_URL": "http://c", "NEBIUS_PROJECT_ID": "p"}
+    res = _invoke("run", "--issue", "196", env=creds)
+    assert res.exit_code == 4, res.stderr
+    assert "Token Factory budget exhausted" in res.stderr
+    assert "Traceback" not in res.stderr
+    assert "warden resume" in res.stderr or "run_id" in res.stderr

@@ -32,6 +32,15 @@ MAX_TOKENS: dict[Role, int | None] = {
 }
 
 
+class ProviderBudgetError(RuntimeError):
+    """Token Factory answered 402: the account is out of credit. Not Warden's cost cap — the run
+    stops cleanly and can be resumed once funds are added."""
+
+    def __init__(self, message: str, *, fix: str) -> None:
+        super().__init__(message)
+        self.fix = fix
+
+
 @dataclass
 class ChatResult:
     content: str | None
@@ -87,7 +96,16 @@ class LLM:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
         t0 = time.perf_counter()
-        resp = self.client.chat.completions.create(**kwargs)
+        try:
+            resp = self.client.chat.completions.create(**kwargs)
+        except Exception as err:  # openai is imported lazily; only a 402 is translated
+            if getattr(err, "status_code", None) != 402:
+                raise
+            self._log.emit(phase, "error", {"role": role.value, "model": model, "http": 402})
+            raise ProviderBudgetError(
+                "Token Factory budget exhausted (HTTP 402 Payment Required)",
+                fix="add funds or redeem credits at tokenfactory.nebius.com, then `warden resume`",
+            ) from err
         ms = int((time.perf_counter() - t0) * 1000)
         usage = resp.usage
         pt = int(getattr(usage, "prompt_tokens", 0) or 0)

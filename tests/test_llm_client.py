@@ -54,3 +54,42 @@ def test_explicit_max_tokens_wins(tmp_path: Path) -> None:
     llm, fake = _llm(tmp_path)
     llm.structured(Role.PLANNER, "plan", "s", "u", Out, max_tokens=4000)
     assert fake.kwargs[0]["max_tokens"] == 4000
+
+
+def test_provider_402_becomes_a_budget_error_with_an_event(tmp_path: Path) -> None:
+    import json
+
+    import pytest
+
+    from warden.llm.client import ProviderBudgetError
+
+    class PaymentRequiredError(Exception):
+        status_code = 402
+
+    llm, fake = _llm(tmp_path)
+
+    def boom(**kwargs: Any) -> Any:
+        raise PaymentRequiredError("Payment Required: You have exhausted your budget.")
+
+    fake.create = boom  # type: ignore[method-assign]
+    with pytest.raises(ProviderBudgetError, match="budget") as ei:
+        llm.structured(Role.TOOLS, "plan", "s", "u", Out)
+    assert "tokenfactory" in ei.value.fix
+    events = (tmp_path / "runs" / "t" / "events.jsonl").read_text().splitlines()
+    assert any(json.loads(e)["kind"] == "error" for e in events)
+
+
+def test_other_provider_errors_propagate_unchanged(tmp_path: Path) -> None:
+    import pytest
+
+    class TeapotError(Exception):
+        status_code = 418
+
+    llm, fake = _llm(tmp_path)
+
+    def boom(**kwargs: Any) -> Any:
+        raise TeapotError("no")
+
+    fake.create = boom  # type: ignore[method-assign]
+    with pytest.raises(TeapotError):
+        llm.structured(Role.TOOLS, "plan", "s", "u", Out)

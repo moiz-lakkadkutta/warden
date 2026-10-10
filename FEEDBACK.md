@@ -60,6 +60,11 @@ Every entry: date · tool · what happened · numbers · what would have helped.
   separately in `usage`.
 - 2026-10-04 · A5 · Ultra plan calls: 8.6–21.9k prompt tokens, 1.9–8.2k completion tokens, 6–22 s,
   $0.010–0.069 per plan.
+- 2026-10-10 · billing · mid-run `402 Payment Required: You have exhausted your budget` on a
+  Lightning call. Warden's own meter (list-price estimates in cost.py) totals ≈ $1 for everything
+  so far, so either the promo credits were not applied to this project or real prices differ a lot.
+  There is no API to read the remaining balance before a run. → expose a balance/usage endpoint
+  (or a response header) so agents can stop before a 402 instead of at it.
 
 ## Nemotron models
 

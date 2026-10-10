@@ -48,7 +48,17 @@ Gate on main: ruff ✓ format ✓ mypy --strict ✓ **241 passed**. Token Factor
 
 ## Start here next session
 
-### 1. B6-live: `warden run --issue N` end to end (the Phase B exit)
+### 1. B6-live: wired ✓ (`3849a8c`); acceptance run blocked by Token Factory billing
+
+`warden run --issue 196 --at 43f3851^ --yes` (run `20261010-111217-7c89`) fetched the issue, then
+got **HTTP 402 "budget exhausted"** on the first Lightning call. A 402 now ends as a clean exit 4
+with a fix line (`ProviderBudgetError`). **After adding funds:**
+`WARDEN_MAX_TOOL_TURNS=40 uv run warden resume 20261010-111217-7c89 --yes`, or a fresh
+`warden run --issue 196 --at 43f3851^ --yes`. Expected: about $0.20 and 15–20 min, ending in a
+verdict and, unless it's FAIL, a draft PR on Fabric.
+
+#### Original notes for this step
+
 
 `warden/pipeline.py:live_steps()` has `hunt` and `plan` live; `fix`, `verify` and `pr` are still
 `_not_ready`. The spikes already contain the code to lift:

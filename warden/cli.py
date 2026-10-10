@@ -60,10 +60,11 @@ def _mark(ok: bool) -> str:
 def _guarded(log: EventLog) -> Iterator[None]:
     """The only sanctioned catches around the machine: each becomes the error block + exit code.
 
-    Cost cap → 4, PR open → 1, not-ready → 3. Nothing else is caught (see the NOTE above):
-    `typer.Exit` and real bugs propagate. The log is closed on every path.
+    Cost cap / provider budget (402) → 4, PR open → 1, not-ready → 3. Nothing else is caught
+    (see the NOTE above): `typer.Exit` and real bugs propagate. The log is closed on every path.
     """
     from warden.integrate.pr import PrOpenError
+    from warden.llm.client import ProviderBudgetError
     from warden.llm.cost import CostCapExceededError
     from warden.pipeline import NotReadyError
 
@@ -71,6 +72,8 @@ def _guarded(log: EventLog) -> Iterator[None]:
         yield
     except CostCapExceededError as e:  # cost.py already emitted the cost_cap event
         fail(str(e), run_id=log.run_id, code=4, exc=e)
+    except ProviderBudgetError as e:  # client.py already emitted the error event
+        fail(str(e), fix=f"{e.fix} {log.run_id}", run_id=log.run_id, code=4, exc=e)
     except PrOpenError as e:
         fail(str(e), fix=e.fix, run_id=log.run_id, exc=e)
     except NotReadyError as e:
