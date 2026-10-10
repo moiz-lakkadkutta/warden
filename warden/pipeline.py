@@ -91,6 +91,7 @@ class StepContext:
     yes: bool
     json_out: bool
     requested_issue: int | None
+    at_rev: str | None = None  # replay: plan/fix/verify against this commit, not HEAD
 
     def spent_usd(self) -> float:
         """Running total over events.jsonl (the log flushes per emit, so this session counts)."""
@@ -190,6 +191,7 @@ def run_pipeline(
     progress: Progress | None,
     stop_after: Phase | None = None,
     requested_issue: int | None = None,
+    at_rev: str | None = None,
 ) -> dict[str, Any]:
     """Run every phase after `start_after` up to `stop_after`; return the result dict.
 
@@ -210,10 +212,15 @@ def run_pipeline(
             )
         if requested_issue is None:
             requested_issue = recorded.get("issue")
+        if at_rev is None:
+            at_rev = recorded.get("at")
     elif start_after is not None:
         raise ValueError(f"cannot resume {log.run_id}: run.json missing")
     else:
-        _write_atomic(manifest, json.dumps({"mode": steps.mode, "issue": requested_issue}))
+        record: dict[str, Any] = {"mode": steps.mode, "issue": requested_issue}
+        if at_rev is not None:
+            record["at"] = at_rev
+        _write_atomic(manifest, json.dumps(record))
     ctx = StepContext(
         settings=settings,
         log=log,
@@ -223,6 +230,7 @@ def run_pipeline(
         yes=yes,
         json_out=json_out,
         requested_issue=requested_issue,
+        at_rev=at_rev,
     )
     done = completed_phases(run_dir)
     outputs: dict[Phase, Any] = {}
@@ -301,21 +309,38 @@ def _result(
 
 
 def live_steps() -> Steps:
-    """Placeholder until the live steps land (Phase B): every step raises NotReadyError."""
-
-    def _not_ready(*_: Any) -> Any:
-        raise NotReadyError(
-            "live pipeline lands in Phase B (see docs/warden-plan.md §5)", fix="use --demo for now"
-        )
-
+    """hunt → plan → fix → verify → pr on Nebius (Token Factory + Sandboxes) and GitHub."""
     return Steps(
         mode="live",
         hunt=_live_hunt,
         plan=_live_plan,
-        fix=_not_ready,
-        verify=_not_ready,
-        pr=_not_ready,
+        fix=_live_fix,
+        verify=_live_verify,
+        pr=_live_pr,
     )
+
+
+def _prompt(name: str) -> str:
+    return (Path(__file__).resolve().parents[1] / "prompts" / name).read_text(encoding="utf-8")
+
+
+def _base_box(ctx: StepContext, phase: Phase) -> Any:
+    """The base image; for a replay (`--at`), a kept fork checked out at that commit."""
+    import shlex
+
+    from warden.sandbox.box import open_base
+
+    s = ctx.settings
+    base = open_base(s, ctx.log, phase=phase)
+    if ctx.at_rev is None:
+        return base
+    co = base.run(f"git checkout -q --detach {shlex.quote(ctx.at_rev)}", cwd=s.workdir, keep=True)
+    if not co.ok or co.box is None:
+        raise NotReadyError(
+            f"cannot check out {ctx.at_rev} in the base image: {co.stderr.strip()[:200]}",
+            fix="pass a commit that exists in the target repo (git rev-parse it first)",
+        )
+    return co.box
 
 
 def _live_hunt(ctx: StepContext) -> IssueRef:
@@ -338,17 +363,143 @@ def _live_plan(ctx: StepContext, ref: IssueRef) -> Plan:
     from warden.sandbox.box import open_base
 
     s = ctx.settings
-    issue = fetch_issue(s.target_repo, ref.issue, include_comments=True)
+    # A replay hides comments: on a closed issue they often hold the human's plan.
+    issue = fetch_issue(s.target_repo, ref.issue, include_comments=ctx.at_rev is None)
     llm = LLM(s, CostMeter(cap_usd=s.max_usd_per_issue - ctx.spent_usd()), ctx.log)
     box = open_base(s, ctx.log, phase="plan")
     tav = tavily_client(s.tavily_api_key)
     plan = plan_issue(
         llm,
         issue,
-        context=sandbox_context(lambda cmd: box.run(cmd, cwd="/", keep=False).stdout),
+        context=sandbox_context(
+            lambda cmd: box.run(cmd, cwd="/", keep=False).stdout, rev=ctx.at_rev
+        ),
         search=lambda queries: research(queries, client=tav, log=ctx.log),
         log=ctx.log,
-        prompt=(Path(__file__).resolve().parents[1] / "prompts" / "planner.md").read_text(),
+        prompt=_prompt("planner.md"),
     )
     ctx.progress.step(f"{len(plan.files_to_touch)} files, {len(plan.citations)} citations")
     return plan
+
+
+def _live_fix(ctx: StepContext, plan: Plan) -> Candidate:
+    from warden.fix.implementer import run_implementer
+    from warden.fix.tools import ToolDispatcher
+    from warden.llm.client import LLM
+    from warden.llm.cost import CostMeter
+
+    s = ctx.settings
+    base = _base_box(ctx, "fix")
+    llm = LLM(s, CostMeter(cap_usd=s.max_usd_per_issue - ctx.spent_usd()), ctx.log)
+    dispatcher = ToolDispatcher(ctx.log, cwd=s.workdir, shell_wrap=s.shell_wrap)
+    cand = run_implementer(
+        llm,
+        base,
+        plan,
+        ctx.log,
+        dispatcher=dispatcher,
+        max_tool_turns=s.max_tool_turns,
+        progress=ctx.progress,
+    )
+    ctx.progress.step(
+        f"{'done' if cand.done else 'blocked'} in {cand.tool_turns} turns, "
+        f"{len(cand.tests_added)} new tests"
+    )
+    return cand
+
+
+def _live_verify(ctx: StepContext, plan: Plan, cand: Candidate) -> Verdict:
+    import shlex
+
+    from warden.verify.gate import PROFILES, run_gate
+    from warden.verify.theater import theater_check
+    from warden.verify.verifier import decide
+
+    s = ctx.settings
+    base = _base_box(ctx, "verify")
+    candidate = base.sibling(cand.image_uuid)
+    theater = None
+    if cand.tests_added:
+        files = sorted({n.split("::", 1)[0] for n in cand.tests_added})
+        new_tests = {
+            f: candidate.run(f"cat {shlex.quote(f)}", cwd=s.workdir, keep=False).stdout.encode()
+            for f in files
+        }
+        theater = theater_check(
+            base, new_tests, node_ids=cand.tests_added, cwd=s.workdir, wrap=s.shell_wrap
+        )
+        ctx.log.note("verify", f"theater: {theater.label}")
+        ctx.progress.step(f"theater: {theater.label}")
+    ctx.progress.step("gate: full suite, mypy, ruff, alembic, OpenAPI (≈ 11 min)")
+    gate = run_gate(
+        candidate,
+        ctx.log,
+        commands=PROFILES[s.gate_profile],
+        cwd=s.workdir,
+        wrap=s.shell_wrap,
+        timeout=1800,
+    )
+    verdict = decide(cand, theater, gate)
+    ctx.progress.step(f"verdict: {verdict.decision}")
+    return verdict
+
+
+def _live_pr(
+    ctx: StepContext, issue: IssueRef, plan: Plan, cand: Candidate, verdict: Verdict
+) -> PrOutcome:
+    from warden.integrate.branch import export_patch, push_fix_branch
+    from warden.integrate.pr import confirm_pr, evidence_table, labels_for, open_draft_pr
+    from warden.sandbox.box import open_base
+
+    s = ctx.settings
+    labels = labels_for(plan)
+    note = (
+        f"Replay of a closed issue at `{ctx.at_rev}`: re-solved from the issue text alone "
+        "(comments hidden) on the code as it was before the human fix. Evidence, not for merging."
+        if ctx.at_rev
+        else None
+    )
+    calls: dict[str, int] = {}
+    for line in (ctx.run_dir / "events.jsonl").read_text(encoding="utf-8").splitlines():
+        ev = RunEvent.model_validate_json(line)
+        if ev.kind == "llm":
+            model = str(ev.data.get("model", "?"))
+            calls[model] = calls.get(model, 0) + 1
+    body = evidence_table(
+        issue.issue,
+        issue.title,
+        plan,
+        verdict,
+        cost_usd=ctx.spent_usd(),
+        calls_by_model=calls,
+        note=note,
+    )
+    title = f"{'[Warden replay] ' if ctx.at_rev else '[Warden] '}#{issue.issue} {issue.title}"
+    label = labels[0] if labels else None
+    if verdict.decision == "FAIL":
+        ctx.progress.step("verdict FAIL: no branch pushed, no PR opened (body in artifacts)")
+        return PrOutcome(body=body, title=title, label=label, url=None)
+    if not confirm_pr(ctx.yes, what=f"{s.target_repo}: {title}", run_id=ctx.log.run_id):
+        return PrOutcome(body=body, title=title, label=label, url=None)
+
+    candidate = open_base(s, ctx.log, phase="pr").sibling(cand.image_uuid)
+    patch = export_patch(candidate, cwd=s.workdir, issue=issue.issue, title=issue.title)
+    ctx.log.artifact("candidate.patch", patch)
+    base_rev = None
+    if ctx.at_rev is not None:
+        sha = candidate.run(f"git rev-parse {ctx.at_rev}", cwd=s.workdir, keep=False)
+        base_rev = sha.stdout.strip() if sha.ok else ctx.at_rev
+    pushed = push_fix_branch(
+        s.target_repo,
+        patch,
+        issue=issue.issue,
+        run_id=ctx.log.run_id,
+        base_rev=base_rev,
+        cache_dir=s.runs_dir / ".repos" / s.target_repo.replace("/", "__"),
+    )
+    ctx.progress.step(f"pushed {pushed.head} on {pushed.base}")
+    pr = open_draft_pr(
+        s.target_repo, pushed.head, pushed.base, title, body, labels=labels, log=ctx.log
+    )
+    ctx.progress.step(f"draft PR {pr.url}")
+    return PrOutcome(body=body, title=title, label=label, url=pr.url)

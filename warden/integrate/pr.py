@@ -178,11 +178,15 @@ def evidence_table(
     cost_usd: float,
     calls_by_model: dict[str, int],
     log_url: str | None = None,
+    note: str | None = None,
 ) -> str:
     link = f" [↗]({log_url})" if log_url else ""
-    theater = (
-        "FAIL — as required" if verdict.theater_failed_on_base else "PASSED — tests are theater"
-    )
+    if verdict.theater_failed_on_base:
+        theater = "FAIL — as required"
+    elif verdict.theater_inconclusive:
+        theater = "inconclusive — not proof"
+    else:
+        theater = "PASSED — tests are theater"
     suite = ", ".join(f"{v} {k}" for k, v in verdict.suite.items()) or "not run"
     race = (
         f"{verdict.race.threads} threads → {verdict.race.effects_on_candidate} effect(s)"
@@ -210,6 +214,7 @@ def evidence_table(
     lines = [
         f"## Warden evidence — #{issue} {title}",
         "",
+        *([f"> {note}", ""] if note else []),
         f"**Verdict: {verdict.decision.replace('_', ' ')}**",
         "",
         "| Check | Result |",

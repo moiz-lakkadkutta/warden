@@ -278,6 +278,14 @@ def run(
     max_usd: Annotated[float | None, typer.Option(help="Override the per-issue cost cap.")] = None,
     plain: Annotated[bool, typer.Option(help="No colour or animation.")] = False,
     run_id: Annotated[str | None, typer.Option("--run-id", hidden=True)] = None,
+    at: Annotated[
+        str | None,
+        typer.Option(
+            "--at",
+            help="Replay a closed issue at this commit (e.g. the fix's parent): plan, fix and "
+            "verify run on that code, issue comments are hidden, the PR targets warden/base-<sha>.",
+        ),
+    ] = None,
 ) -> None:
     """Hunt → plan → fix → verify → PR for one issue. Prints run_id first (see `warden resume`)."""
     from warden.config import load_settings
@@ -336,6 +344,7 @@ def run(
             progress=progress,
             stop_after="plan" if dry_run else None,
             requested_issue=issue,
+            at_rev=at,
         )
         if not json_out:
             _err(result["evidence"])

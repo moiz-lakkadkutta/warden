@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import json
 import os
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -335,7 +336,7 @@ def test_live_steps_not_ready(settings: Settings) -> None:
         )
     log.close()
     assert ei.value.fix == "use --demo for now"
-    assert "Phase B" in str(ei.value)
+    assert "live fix step" in str(ei.value)
     run_dir = settings.runs_dir / log.run_id
     assert json.loads((run_dir / "run.json").read_text()) == {"mode": "live", "issue": 42}
     assert sorted(f.name for f in (run_dir / "artifacts").iterdir()) == ["issue.json", "plan.json"]
@@ -410,3 +411,66 @@ def test_existing_manifest_mode_guard_on_fresh_start(settings: Settings) -> None
     log.close()
     assert ran == []
     assert json.loads(manifest.read_text()) == {"mode": "live", "issue": 7}
+
+
+def test_at_rev_is_recorded_in_the_manifest_and_reaches_steps(settings: Settings) -> None:
+    import warden.pipeline as pipeline
+
+    seen: list[str | None] = []
+
+    def hunt(ctx: pipeline.StepContext) -> pipeline.IssueRef:
+        seen.append(ctx.at_rev)
+        return pipeline.IssueRef(issue=196, title="t")
+
+    steps = replace(pipeline.live_steps(), hunt=hunt)
+    log = EventLog(settings.runs_dir)
+    run_pipeline(
+        settings,
+        log,
+        steps,
+        start_after=None,
+        json_out=False,
+        yes=False,
+        progress=None,
+        requested_issue=196,
+        at_rev="43f3851^",
+        stop_after="hunt",
+    )
+    log.close()
+    manifest = json.loads((settings.runs_dir / log.run_id / "run.json").read_text())
+    assert manifest == {"mode": "live", "issue": 196, "at": "43f3851^"}
+    assert seen == ["43f3851^"]
+
+    # resume: the manifest's `at` wins when the caller passes none
+    log2 = EventLog(settings.runs_dir, log.run_id)
+    run_pipeline(
+        settings,
+        log2,
+        steps,
+        start_after="hunt",
+        json_out=False,
+        yes=False,
+        progress=None,
+        stop_after="plan",
+    )
+    log2.close()
+    plan_seen: list[str | None] = []
+
+    def plan(ctx: pipeline.StepContext, ref: pipeline.IssueRef) -> object:
+        plan_seen.append(ctx.at_rev)
+        raise RuntimeError("stop")
+
+    log3 = EventLog(settings.runs_dir, log.run_id)
+    (settings.runs_dir / log.run_id / "artifacts" / "plan.json").unlink()
+    with pytest.raises(RuntimeError, match="stop"):
+        run_pipeline(
+            settings,
+            log3,
+            replace(steps, plan=plan),
+            start_after="hunt",
+            json_out=False,
+            yes=False,
+            progress=None,
+        )
+    log3.close()
+    assert plan_seen == ["43f3851^"]

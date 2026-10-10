@@ -122,6 +122,10 @@ class Box:
     ) -> Box:
         return cls(backend, backend.use(ref), log, phase=phase)
 
+    def sibling(self, ref: str) -> Box:
+        """Another image (tag or uuid) on the same backend and log, e.g. a candidate by uuid."""
+        return Box.from_ref(self._b, ref, self._log, phase=self.phase)
+
     @property
     def uuid(self) -> str:
         return self._b.uuid_of(self._image)

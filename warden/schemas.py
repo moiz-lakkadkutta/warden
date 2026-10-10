@@ -79,6 +79,7 @@ class Candidate(BaseModel):
     tool_turns: int
     tests_added: list[str]
     cost_usd: float
+    done: bool | None = None  # implementer called finish(done=true); None = not recorded
 
 
 class FixReport(BaseModel):
@@ -105,6 +106,7 @@ class RaceResult(BaseModel):
 class Verdict(BaseModel):
     decision: Decision
     theater_failed_on_base: bool
+    theater_inconclusive: bool = False  # collection error / no tests ran on base: not proof
     suite: dict[str, int] = Field(
         default_factory=dict, description="e.g. {'passed': 214, 'failed': 0}"
     )

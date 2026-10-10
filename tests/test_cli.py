@@ -301,7 +301,7 @@ def test_run_live_exits_3_via_machine(tmp_path: Path) -> None:
     creds = {"NEBIUS_API_KEY": "x", "CONTREE_BASE_URL": "http://c", "NEBIUS_PROJECT_ID": "p"}
     res = _invoke("run", "--issue", "1", env=creds)
     assert res.exit_code == 3, res.stderr
-    assert "live pipeline lands in Phase B" in res.stderr
+    assert "live fix step" in res.stderr
     assert "fix: use --demo for now" in res.stderr
     run_id = _run_id(res.stderr)
     manifest = json.loads((tmp_path / "runs" / run_id / "run.json").read_text())
@@ -355,3 +355,13 @@ def test_resume_errors_carry_run_id() -> None:
     run_id = _run_id(_invoke("run", "--demo").stderr)
     res = _invoke("resume", run_id)
     assert res.exit_code == 2 and f"run_id {run_id}" in res.stderr
+
+
+def test_run_at_records_the_replay_commit(tmp_path: Path) -> None:
+    creds = {"NEBIUS_API_KEY": "x", "CONTREE_BASE_URL": "http://c", "NEBIUS_PROJECT_ID": "p"}
+    res = _invoke("run", "--issue", "196", "--at", "43f3851^", env=creds)
+    assert res.exit_code == 3, res.stderr  # offline fixture stops at fix
+    run_id = _run_id(res.stderr)
+    manifest = json.loads((tmp_path / "runs" / run_id / "run.json").read_text())
+    assert manifest == {"mode": "live", "issue": 196, "at": "43f3851^"}
+    assert "--at" in _invoke("run", "--help").stdout

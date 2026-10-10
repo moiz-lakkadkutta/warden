@@ -357,4 +357,5 @@ def run_implementer(
         tool_turns=turns,
         tests_added=list(tests_added),
         cost_usd=round(cost, 6),
+        done=report is not None and report.done,
     )

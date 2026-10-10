@@ -46,3 +46,34 @@ def test_labels_for_is_the_single_label_decision(
     assert labels_for(make_plan(["tax", "concurrency"])) == [PENDING_LABEL]
     assert labels_for(make_plan(["concurrency"])) == []
     assert labels_for(make_plan([])) == []
+
+
+def test_evidence_table_says_inconclusive_and_shows_a_note() -> None:
+    from warden.schemas import Plan, Verdict
+
+    plan = Plan(
+        issue=1,
+        summary="s",
+        files_to_touch=[],
+        tests_to_add=[],
+        landing_order=[],
+        risk_class=["none"],
+        citations=[],
+        acceptance=[],
+    )
+    v = Verdict(
+        decision="PASS_WITH_CONCERNS",
+        theater_failed_on_base=False,
+        theater_inconclusive=True,
+        suite={"passed": 3, "failed": 0},
+        mypy_ok=True,
+        ruff_ok=True,
+        alembic_single_head=True,
+        openapi_drift=False,
+    )
+    body = evidence_table(1, "t", plan, v, cost_usd=0.1, calls_by_model={}, note="Replay of #1.")
+    assert (
+        "inconclusive" in body
+        and "theater" not in body.split("New tests on unfixed base")[1].split("\n")[0]
+    )
+    assert "> Replay of #1." in body
