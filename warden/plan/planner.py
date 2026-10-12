@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 import shlex
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Protocol, TypeVar
 
 from pydantic import BaseModel
@@ -22,7 +23,24 @@ from warden.schemas import Phase, Plan, ResearchQueries
 
 T = TypeVar("T", bound=BaseModel)
 
-LS_DIRS = ("backend/app", "backend/tests", "backend/alembic/versions")
+
+@dataclass(frozen=True)
+class Layout:
+    """Where the planner looks: repo root in the box, the dirs it lists, the paths it greps."""
+
+    root: str = "/src"
+    ls: tuple[str, ...] = ("backend/app", "backend/tests", "backend/alembic/versions")
+    grep: tuple[str, ...] = ("backend",)
+
+
+FABRIC_LAYOUT = Layout()
+
+
+def generic_layout(root: str) -> Layout:
+    """Any Python repo: list and grep every tracked .py file under `root`."""
+    return Layout(root=root, ls=("*.py",), grep=("*.py",))
+
+
 LS_LIMIT = 600
 GREP_LINES_PER_TERM = 12
 MAX_TERMS = 10
@@ -61,28 +79,36 @@ def code_terms(text: str, *, extra: list[str] | None = None) -> list[str]:
     return found[:MAX_TERMS]
 
 
-def context_command(terms: list[str], *, rev: str | None = None, with_files: bool = True) -> str:
+def context_command(
+    terms: list[str],
+    *,
+    rev: str | None = None,
+    with_files: bool = True,
+    layout: Layout = FABRIC_LAYOUT,
+) -> str:
     """One POSIX-sh command (the sandbox shell is dash) printing the file list then grep hits.
 
     With `rev`, read that revision straight from git (no checkout), so a closed issue can be
     replayed against the code as it was before the fix — not the already-fixed HEAD.
     """
-    dirs = " ".join(LS_DIRS)
+    dirs = " ".join(shlex.quote(d) for d in layout.ls)
+    where = " ".join(shlex.quote(g) for g in layout.grep)
+    cd = f"cd {shlex.quote(layout.root)}"
     if rev is None:
-        parts = ["cd /src"]
+        parts = [cd]
         if with_files:
             parts.append(f"git ls-files -- {dirs} | head -{LS_LIMIT}")
     else:
-        parts = ["cd /src", f"rev=$(git rev-parse --verify {shlex.quote(rev + '^{commit}')})"]
+        parts = [cd, f"rev=$(git rev-parse --verify {shlex.quote(rev + '^{commit}')})"]
         if with_files:
             parts.append(f'git ls-tree -r --name-only "$rev" -- {dirs} | head -{LS_LIMIT}')
     for term in terms:
         q = shlex.quote(term)
         parts.append(f"echo @@GREP {q}")
         if rev is None:
-            grep = f"git grep -n -I -F -e {q} -- backend"
+            grep = f"git grep -n -I -F -e {q} -- {where}"
         else:
-            grep = f'git grep -n -I -F -e {q} "$rev" -- backend | sed "s|^$rev:||"'
+            grep = f'git grep -n -I -F -e {q} "$rev" -- {where} | sed "s|^$rev:||"'
         parts.append(f"{grep} | head -{GREP_LINES_PER_TERM}")
     return "; ".join(parts)
 
@@ -98,9 +124,9 @@ def top_source_files(context: str, *, k: int = TOP_FILES) -> list[str]:
     return sorted(counts, key=lambda p: -counts[p])[:k]
 
 
-def source_command(paths: list[str], *, rev: str | None = None) -> str:
+def source_command(paths: list[str], *, rev: str | None = None, root: str = "/src") -> str:
     """Numbered source of `paths` (at `rev` if given), one `@@FILE path` block each."""
-    parts = ["cd /src"]
+    parts = [f"cd {shlex.quote(root)}"]
     if rev is not None:
         parts.append(f"rev=$(git rev-parse --verify {shlex.quote(rev + '^{commit}')})")
     for path in paths:
@@ -117,16 +143,17 @@ def gather_context(
     *,
     rev: str | None = None,
     with_files: bool = True,
+    layout: Layout = FABRIC_LAYOUT,
 ) -> str:
     """File list + grep hits; with `with_files`, also the numbered source of the top hit files."""
     if not terms and not with_files:
         return ""
-    ctx = run(context_command(terms, rev=rev, with_files=with_files))
+    ctx = run(context_command(terms, rev=rev, with_files=with_files, layout=layout))
     if not with_files:
         return ctx
     top = top_source_files(ctx)
     if top:
-        ctx = f"{ctx}\n{run(source_command(top, rev=rev))}"
+        ctx = f"{ctx}\n{run(source_command(top, rev=rev, root=layout.root))}"
     return ctx
 
 
@@ -150,11 +177,13 @@ class ContextFn(Protocol):
     def __call__(self, terms: list[str], with_files: bool = True) -> str: ...
 
 
-def sandbox_context(run: Callable[[str], str], *, rev: str | None = None) -> ContextFn:
+def sandbox_context(
+    run: Callable[[str], str], *, rev: str | None = None, layout: Layout = FABRIC_LAYOUT
+) -> ContextFn:
     """A ContextFn over a shell runner (live: `box.run(cmd, keep=False).stdout`)."""
 
     def ctx(terms: list[str], with_files: bool = True) -> str:
-        return gather_context(run, terms, rev=rev, with_files=with_files)
+        return gather_context(run, terms, rev=rev, with_files=with_files, layout=layout)
 
     return ctx
 

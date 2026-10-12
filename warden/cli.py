@@ -353,6 +353,65 @@ def run(
             _err(result["evidence"])
 
 
+@app.command("eval")
+def eval_swe(
+    n: Annotated[int, typer.Option(help="How many SWE-rebench tasks to sample.")] = 10,
+    seed: Annotated[int, typer.Option(help="Sampling seed (fixed for a reportable run).")] = 7,
+    budget: Annotated[
+        float, typer.Option(help="Stop before a task that could take total spend over this (USD).")
+    ] = 5.0,
+    max_usd: Annotated[float | None, typer.Option(help="Override the per-task cost cap.")] = None,
+    out: Annotated[
+        Path, typer.Option(help="Directory for tasks.jsonl, task_ids.txt, results.csv.")
+    ] = Path("evals/swe_rebench"),
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Start without asking.")] = False,
+) -> None:
+    """SWE-rebench on Nebius preloaded images: plan → fix → verify → hidden tests → results.csv.
+
+    Tasks already in results.csv are skipped, so re-running the same command resumes."""
+    from warden.config import load_settings
+    from warden.eval import swe_rebench as swe
+    from warden.runlog.events import EventLog
+
+    s = load_settings()
+    if max_usd is not None:
+        s.max_usd_per_issue = max_usd
+    missing = s.missing_for("NEBIUS_API_KEY", "CONTREE_BASE_URL", "NEBIUS_PROJECT_ID")
+    if missing:
+        fail(f"missing {', '.join(missing)}", fix="run `warden doctor`", code=2)
+    tasks_path = out / "tasks.jsonl"
+    if tasks_path.exists():
+        tasks = swe.load_tasks(tasks_path)
+    else:
+        _err(f"sampling {n} tasks from {swe.DATASET} ({swe.SPLIT}, seed {seed})")
+        tasks = swe.fetch_sample(tasks_path, n, seed=seed)
+        (out / "task_ids.txt").write_text("\n".join(t.instance_id for t in tasks) + "\n")
+    csv_path = out / "results.csv"
+    todo = [t for t in tasks if t.instance_id not in swe.done_ids(csv_path)]
+    _err(
+        f"{len(todo)} of {len(tasks)} tasks to run · budget ${budget:.2f} · "
+        f"cap ${s.max_usd_per_issue:.2f}/task · results → {csv_path}"
+    )
+    if not todo:
+        raise typer.Exit(0)
+    if not yes and not typer.confirm("Start (this spends Token Factory credit)?", err=True):
+        raise typer.Exit(1)
+
+    def show(row: swe.Row) -> None:
+        mark = "✓" if row.resolved else "✗"
+        extra = f"  {row.error}" if row.error else ""
+        _err(
+            f"{mark} {row.task_id}  {row.verdict}  ${row.usd:.2f}  {row.seconds}s"
+            f"{'  FALSE PASS' if row.false_pass else ''}{extra}"
+        )
+
+    log = EventLog(s.runs_dir, "eval")
+    with _guarded(log):
+        rows = swe.run_eval(todo, s, csv_path=csv_path, budget_usd=budget, on_row=show)
+    resolved = sum(r.resolved for r in rows)
+    _err(f"ran {len(rows)} · resolved {resolved} · spent ${sum(r.usd for r in rows):.2f}")
+
+
 @app.command()
 def resume(
     run_id: Annotated[str, typer.Argument(help="The run_id printed by `warden run`.")],

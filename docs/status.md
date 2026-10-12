@@ -1,4 +1,4 @@
-# Warden — status (2026-10-10, end of session 2)
+# Warden — status (2026-10-12)
 
 ## Phase A spike: done (A3–A7 live on Nebius)
 
@@ -67,6 +67,33 @@ Run `20261010-123442-279b`: `warden run --issue 196 --at 43f3851^ --yes`, capped
 
 **Next (each paid run needs Moiz's OK):** B2 criterion on two more #212 issues, then C5/C6
 Hunter, the D3 SWE-rebench harness, and E3/E4 console + README.
+
+Fabric's own CI on #221: **7/7 jobs green** (backend lint + mypy, pytest, E2E, frontend lint
+and tests, OpenAPI drift, Docker build). #220 failed lint; #221 is what Warden's gate let through.
+
+### 1b. D3: SWE-rebench harness built (2026-10-12), pilot not yet run
+
+- **Images:** Sandboxes already preloads 6,873 `swerebench/…` task images (and 32k SWE-rebench-V2,
+  500 SWE-bench Verified). Tag = the dataset's `image_name` + `:latest`. Tasks come from HF
+  `nebius/SWE-rebench`, split `filtered` (6,542 rows), via the public datasets-server.
+- **`warden eval --n 10 --seed 7 --budget 5`:**
+  1. Samples by seed and caches the rows to `evals/swe_rebench/tasks.jsonl`, *without* the gold
+     patch, plus `task_ids.txt`.
+  2. Per task: `prepare_base` adds the `testbed-env` wrapper (the task's conda env first on PATH),
+     then plan → fix → verify run with profile `swe`. The gate runs the repo's own `test_cmd` on
+     the candidate's test files; mypy, ruff, alembic and OpenAPI are reported as "not configured",
+     never as green.
+  3. Grading follows the official harness: reset the test files to the base commit, apply
+     `test_patch`, run F2P + P2P.
+  4. One row per task goes to `results.csv` (`task_id, resolved, verdict, false_pass,
+     theater_catch, tool_turns, usd, seconds, error`). A re-run skips finished tasks. It stops
+     before a task that could push the total over `--budget`.
+- **Checked live with no model calls:** wrapper → Python 3.9 + pytest from the testbed env; the
+  unfixed spectree-64 grades not resolved, and with the gold patch, resolved (2.4 s each).
+- **Planner:** now generic. A `Layout` (root, ls, grep) replaces the hardcoded `/src` and
+  `backend`, and the repo description moved to `prompts/repos/{fabric,generic}.md`.
+- **Next:** the 10-task pilot, ≈ $2–5 at #196's $0.17/task, capped at $1/task. **It needs Moiz's
+  OK.** Then E1 (50 tasks).
 
 ### 1a. Earlier notes: blocked by Token Factory billing (resolved)
 

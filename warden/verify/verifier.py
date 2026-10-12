@@ -42,13 +42,14 @@ def decide(cand: Candidate, theater: TheaterResult | None, gate: GateResult | No
             passed.append(f"full suite green ({gate.suite.get('passed')} passed)")
         else:
             fail.append(f"full suite not green ({gate.suite or 'no summary'})")
-        for ok, name in (
-            (gate.mypy_ok, "mypy"),
-            (gate.ruff_ok, "ruff check / format"),
-            (gate.alembic_single_head, "alembic upgrade + single head"),
-            (not gate.openapi_drift, "OpenAPI snapshot drift"),
+        for check, ok, name in (
+            ("mypy", gate.mypy_ok, "mypy"),
+            ("ruff", gate.ruff_ok, "ruff check / format"),
+            ("alembic", gate.alembic_single_head, "alembic upgrade + single head"),
+            ("openapi", not gate.openapi_drift, "OpenAPI snapshot drift"),
         ):
-            (passed if ok else fail).append(f"{name} {'clean' if ok else 'red'}")
+            if gate.ran(check):  # a check the profile does not run is in not_verified instead
+                (passed if ok else fail).append(f"{name} {'clean' if ok else 'red'}")
 
     decision = "FAIL" if fail else ("PASS_WITH_CONCERNS" if concerns else "PASS")
     return Verdict(

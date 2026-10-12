@@ -17,11 +17,15 @@ import os
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from warden.config import Settings
 from warden.runlog.events import EventLog
 from warden.schemas import Candidate, Phase, Plan, RunEvent, Verdict
+
+if TYPE_CHECKING:
+    from warden.hunt.issue import IssueText
+    from warden.verify.gate import GateCommands
 
 PHASES: tuple[Phase, ...] = ("hunt", "plan", "fix", "verify", "pr")
 MARKER: dict[Phase, str] = {
@@ -92,6 +96,7 @@ class StepContext:
     json_out: bool
     requested_issue: int | None
     at_rev: str | None = None  # replay: plan/fix/verify against this commit, not HEAD
+    issue: IssueText | None = None  # given issue text (eval tasks); None = fetch from GitHub
 
     def spent_usd(self) -> float:
         """Running total over events.jsonl (the log flushes per emit, so this session counts)."""
@@ -192,6 +197,7 @@ def run_pipeline(
     stop_after: Phase | None = None,
     requested_issue: int | None = None,
     at_rev: str | None = None,
+    issue: IssueText | None = None,
 ) -> dict[str, Any]:
     """Run every phase after `start_after` up to `stop_after`; return the result dict.
 
@@ -231,6 +237,7 @@ def run_pipeline(
         json_out=json_out,
         requested_issue=requested_issue,
         at_rev=at_rev,
+        issue=issue,
     )
     done = completed_phases(run_dir)
     outputs: dict[Phase, Any] = {}
@@ -358,13 +365,14 @@ def _live_plan(ctx: StepContext, ref: IssueRef) -> Plan:
     from warden.hunt.issue import fetch_issue
     from warden.llm.client import LLM
     from warden.llm.cost import CostMeter
-    from warden.plan.planner import plan_issue, sandbox_context
+    from warden.plan.planner import FABRIC_LAYOUT, generic_layout, plan_issue, sandbox_context
     from warden.plan.research import research, tavily_client
     from warden.sandbox.box import open_base
 
     s = ctx.settings
     # A replay hides comments: on a closed issue they often hold the human's plan.
-    issue = fetch_issue(s.target_repo, ref.issue, include_comments=ctx.at_rev is None)
+    issue = ctx.issue or fetch_issue(s.target_repo, ref.issue, include_comments=ctx.at_rev is None)
+    layout = FABRIC_LAYOUT if s.gate_profile == "fabric" else generic_layout(s.workdir)
     meter = CostMeter(cap_usd=s.max_usd_per_issue - ctx.spent_usd())
     llm = LLM(s, meter, ctx.log)
     box = open_base(s, ctx.log, phase="plan")
@@ -373,11 +381,11 @@ def _live_plan(ctx: StepContext, ref: IssueRef) -> Plan:
         llm,
         issue,
         context=sandbox_context(
-            lambda cmd: box.run(cmd, cwd="/", keep=False).stdout, rev=ctx.at_rev
+            lambda cmd: box.run(cmd, cwd="/", keep=False).stdout, rev=ctx.at_rev, layout=layout
         ),
         search=lambda queries: research(queries, client=tav, log=ctx.log),
         log=ctx.log,
-        prompt=_prompt("planner.md"),
+        prompt=planner_prompt(s.gate_profile),
     )
     ctx.progress.cost(meter.spent_usd)  # the implementer reports its own; the planner doesn't
     ctx.progress.step(f"{len(plan.files_to_touch)} files, {len(plan.citations)} citations")
@@ -414,10 +422,23 @@ def _live_fix(ctx: StepContext, plan: Plan) -> Candidate:
     return cand
 
 
+def planner_prompt(profile: str) -> str:
+    """prompts/planner.md with the repo description for `profile` (Fabric's, or a generic one)."""
+    repo = _prompt(f"repos/{'fabric' if profile == 'fabric' else 'generic'}.md").strip()
+    return _prompt("planner.md").replace("{repo}", repo)
+
+
 def _live_verify(ctx: StepContext, plan: Plan, cand: Candidate) -> Verdict:
+    from warden.verify.gate import PROFILES
+
+    return verify_candidate(ctx, cand, PROFILES[ctx.settings.gate_profile])
+
+
+def verify_candidate(ctx: StepContext, cand: Candidate, commands: GateCommands) -> Verdict:
+    """Theater check on the base, the gate on the candidate, then the deterministic verdict."""
     import shlex
 
-    from warden.verify.gate import PROFILES, run_gate
+    from warden.verify.gate import run_gate
     from warden.verify.theater import theater_check
     from warden.verify.verifier import decide
 
@@ -436,11 +457,22 @@ def _live_verify(ctx: StepContext, plan: Plan, cand: Candidate) -> Verdict:
         )
         ctx.log.note("verify", f"theater: {theater.label}")
         ctx.progress.step(f"theater: {theater.label}")
-    ctx.progress.step("gate: full suite, mypy, ruff, alembic, OpenAPI (≈ 11 min)")
+    ran = [
+        n
+        for n, cmd in (
+            ("suite", commands.suite),
+            ("mypy", commands.mypy),
+            ("ruff", commands.ruff_check),
+            ("alembic", commands.alembic_upgrade),
+            ("OpenAPI", commands.openapi_snapshot),
+        )
+        if cmd
+    ]
+    ctx.progress.step(f"gate: {', '.join(ran) or 'nothing configured'}")
     gate = run_gate(
         candidate,
         ctx.log,
-        commands=PROFILES[s.gate_profile],
+        commands=commands,
         cwd=s.workdir,
         wrap=s.shell_wrap,
         timeout=1800,

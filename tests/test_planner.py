@@ -314,3 +314,23 @@ def test_citation_matching_ignores_scheme_and_trailing_slash_and_keeps_research_
         prompt="S",
     )
     assert [c.url for c in plan.citations] == [research_url]
+
+
+def test_generic_layout_lists_and_greps_python_files_under_its_root() -> None:
+    from warden.plan.planner import context_command, generic_layout, source_command
+
+    cmd = context_command(["parse_params"], layout=generic_layout("/testbed"))
+    assert cmd.startswith("cd /testbed;")
+    assert "git ls-files -- '*.py'" in cmd
+    assert "git grep -n -I -F -e parse_params -- '*.py'" in cmd
+    assert "backend" not in cmd
+    assert source_command(["a.py"], root="/testbed").startswith("cd /testbed;")
+
+
+def test_planner_prompt_names_fabric_only_for_the_fabric_profile() -> None:
+    from warden.pipeline import planner_prompt
+
+    fabric, generic = planner_prompt("fabric"), planner_prompt("swe")
+    assert "{repo}" not in fabric and "{repo}" not in generic
+    assert "double-entry ledger" in fabric
+    assert "double-entry ledger" not in generic and "Python repository" in generic

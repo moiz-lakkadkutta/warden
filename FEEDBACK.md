@@ -51,6 +51,20 @@ Every entry: date · tool · what happened · numbers · what would have helped.
   a "Bad tag format". `images.import_from(ref, tag=new)` forces a fresh import (54.9 s for 633 MB).
   → resolve by registry digest, or document that `oci()` is cache-by-tag and how to refresh.
 
+- 2026-10-12 · eval images · The preloaded benchmark environments are there but undocumented:
+  `images(tagged=True)` lists 39,520 tags (32,064 `swerebenchv2/…`, 6,873 `swerebench/…`, 500
+  `swebench/…`, 73 base images), with no page that names the tag scheme. It is SWE-bench's:
+  `swerebench/sweb.eval.x86_64.<owner>_1776_<repo>-<n>:latest` = instance `<owner>__<repo>-<n>`,
+  i.e. the dataset's `image_name` plus `:latest`. `images.use(tag)` resolves in 0.3–0.5 s, the
+  first run on a task image takes 27 s (cold), and later runs take 2–3 s. Inside: repo at
+  `/testbed` on the base commit, `/issue.md`, and the task's conda env at
+  `/opt/miniconda3/envs/testbed` — **not on PATH** (`python` is the 3.12 in /opt/conda; the
+  task wants 3.9), so the hidden tests fail to import until you prepend that env. One sentence
+  in the docs would save the probing.
+- 2026-10-12 · eval images · Grading works as the official harness does: test_patch + FAIL_TO_PASS
+  fail on the base (spectree-64: F2P 0/1, P2P 6/6) and pass with the gold patch (1/1, 6/6), 2.4 s
+  per grade.
+
 ## Token Factory inference
 
 - 2026-10-04 · A5 · `response_format={"type": "json_schema", "strict": true}` with the `Plan` schema

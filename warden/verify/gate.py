@@ -71,7 +71,34 @@ FABRIC_COMMANDS = GateCommands(
     autofix="cd backend && ruff format . && ruff check --fix .",
 )
 
-PROFILES: dict[str, GateCommands] = {"generic": DEFAULT_COMMANDS, "fabric": FABRIC_COMMANDS}
+# SWE-rebench / any Python repo without known lint or DB tooling: the suite command is filled per
+# task (the repo's own test command on the files the candidate touched); "" = not run.
+SWE_COMMANDS = GateCommands(
+    suite="",
+    mypy="",
+    ruff_check="",
+    ruff_format="",
+    db_create="",
+    alembic_upgrade="",
+    alembic_env={},
+    alembic_heads="",
+    openapi_snapshot="",
+    openapi_diff="",
+)
+
+PROFILES: dict[str, GateCommands] = {
+    "generic": DEFAULT_COMMANDS,
+    "fabric": FABRIC_COMMANDS,
+    "swe": SWE_COMMANDS,
+}
+
+# Check name -> the steps that make it up; a check whose steps are all "" is not run.
+CHECKS: dict[str, tuple[str, ...]] = {
+    "mypy": ("mypy",),
+    "ruff": ("ruff_check", "ruff_format"),
+    "alembic": ("db_create", "alembic_upgrade", "alembic_heads"),
+    "openapi": ("openapi_snapshot", "openapi_diff"),
+}
 
 
 @dataclass(frozen=True)
@@ -81,6 +108,7 @@ class GateStep:
     exit_code: int
     ms: int
     tail: str  # last 2000 chars of stdout+stderr
+    skipped: bool = False  # command was "" for this profile: not run, never evidence
 
     @property
     def ok(self) -> bool:
@@ -97,6 +125,10 @@ class GateResult:
     steps: tuple[GateStep, ...]
     migration_roundtrip: bool | None = None  # C3 fills it; None = not run
     not_verified: list[str] = field(default_factory=list)
+    skipped: tuple[str, ...] = ()  # CHECKS keys this profile does not run
+
+    def ran(self, check: str) -> bool:
+        return check not in self.skipped
 
     @property
     def suite_ok(self) -> bool:
@@ -169,6 +201,9 @@ def run_gate(
     steps: list[GateStep] = []
 
     def step(name: str, box: Box, shell: str, **kw: Any) -> RunResult:
+        if not shell:
+            steps.append(GateStep(name, "", 0, 0, "", skipped=True))
+            return RunResult("", "", 0, box, 0)
         command = f"{wrap} {shlex.quote(shell)}" if wrap else shell
         res = box.run(command, cwd=cwd, **kw)
         tail = (res.stdout + res.stderr)[-_TAIL:]
@@ -195,14 +230,19 @@ def run_gate(
     snap = child(snapshot, "openapi_snapshot")
     diff = step("openapi_diff", snap, c.openapi_diff, keep=False)
 
+    by_name = {st.name: st for st in steps}
+    skipped = tuple(
+        check for check, names in CHECKS.items() if all(by_name[n].skipped for n in names)
+    )
     result = GateResult(
         suite=parse_suite(suite.stdout),
         mypy_ok=mypy.ok,
         ruff_ok=ruff_check.ok and ruff_format.ok,
-        alembic_single_head=upgrade.ok and count_heads(heads.stdout) == 1,
-        openapi_drift=not snapshot.ok or not diff.ok,
+        alembic_single_head="alembic" in skipped or (upgrade.ok and count_heads(heads.stdout) == 1),
+        openapi_drift="openapi" not in skipped and (not snapshot.ok or not diff.ok),
         steps=tuple(steps),
-        not_verified=list(c.not_covered),
+        not_verified=list(c.not_covered) + [f"{check} (not configured)" for check in skipped],
+        skipped=skipped,
     )
     log.emit(
         "verify",
