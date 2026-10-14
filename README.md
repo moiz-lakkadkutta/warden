@@ -56,9 +56,22 @@ schema / security changes are labelled `PENDING-HUMAN`. Warden never merges.
 
 ## Results
 
-_SWE-rebench numbers are generated from [`evals/swe_rebench/results.csv`](evals/swe_rebench/results.csv)
-(fixed seed, task ids in [`task_ids.txt`](evals/swe_rebench/task_ids.txt)). The table lands here
-with the next eval run: resolved %, verifier false-PASS %, false-FAIL %, theater catches, $/task._
+SWE-rebench pilot, 10 tasks (`warden eval --n 10 --seed 7`, $1/task cap, 40 tool turns). Every
+row is in [`evals/swe_rebench/results.csv`](evals/swe_rebench/results.csv); the task ids are in
+[`task_ids.txt`](evals/swe_rebench/task_ids.txt). "Resolved" means the dataset's hidden tests
+pass, and Warden never sees those tests.
+
+| metric | pilot 2 (2026-10-14) |
+|---|---|
+| Resolved | **4 / 10** |
+| Verifier PASS that hidden tests reject (false PASS) | 3 of 5 PASS |
+| Verifier FAIL on a fix hidden tests accept (false FAIL) | 2 of 5 FAIL: one ran out of turns before writing a test, one test file hung |
+| Theater catches (new test already passes on the unfixed base) | 1 |
+| Cost | **$0.13 / task**, $1.33 total |
+
+Pilot 2 ran *before* the regression check and spec review existed. All three false PASSes came
+from the implementer fixing its own reading of the issue, which is the failure those two checks
+target. The next eval measures them. At 10 tasks these numbers are a pilot, not a benchmark.
 
 ## How it works
 
