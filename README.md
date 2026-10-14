@@ -84,7 +84,10 @@ issue ─▶ PLANNER (Ultra + Tavily citations, sandbox code context) ─▶ Pla
 ```
 
 Every model call and sandbox operation is appended to `runs/<id>/events.jsonl` with tokens, cost
-and wall-clock; `warden console` renders it. A per-issue cost cap stops the run cleanly, and
+and wall-clock; `warden console` renders it to one self-contained HTML page plus
+`runs/<id>/timeline.gif` (Pillow, `uv sync --extra gif`), and `warden console <id>... --out site`
+writes a static site (index + one page per run) that `.github/workflows/console-pages.yml`
+publishes to GitHub Pages. A per-issue cost cap stops the run cleanly, and
 `warden resume <run_id>` continues from the last completed phase.
 
 ## Quickstart (live)
