@@ -21,12 +21,21 @@ dependencies = [
 
 [project.optional-dependencies]
 console = ["fastapi>=0.115", "uvicorn>=0.30"]
+gif = [
+    "pillow>=10.4",
+]
 
 [project.scripts]
 warden = "warden.cli:app"
 
 [dependency-groups]
-dev = ["pytest>=8", "pytest-asyncio>=0.24", "ruff>=0.6", "mypy>=1.11"]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "pillow>=10.4",
+]
 
 [build-system]
 requires = ["hatchling"]

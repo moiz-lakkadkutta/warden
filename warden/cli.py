@@ -478,29 +478,68 @@ def resume(
 
 @app.command()
 def console(
+    run_ids: Annotated[
+        list[str] | None,
+        typer.Argument(help="Run ids to render (default: the latest run).", show_default=False),
+    ] = None,
     run_id: Annotated[
         str | None, typer.Option("--run-id", "--run", help="Render one run to static HTML.")
     ] = None,
+    out: Annotated[
+        Path | None,
+        typer.Option(
+            "--out",
+            help="Write a deployable site here: index.html listing the runs, <id>/index.html "
+            "per run with its events.jsonl, cost.jsonl, pr_body.md and timeline.gif.",
+        ),
+    ] = None,
+    all_runs: Annotated[bool, typer.Option("--all", help="Every run under runs/.")] = False,
+    gif: Annotated[
+        bool, typer.Option(help="Also render runs/<id>/timeline.gif (needs the gif extra).")
+    ] = True,
     static: Annotated[
         bool, typer.Option(help="Write runs/<id>/index.html instead of serving.")
     ] = True,
 ) -> None:
-    """Render a run's timeline, branch tree and evidence table."""
+    """Render a run's timeline, branch tree and evidence table (stdout: the page written)."""
     from warden.config import load_settings
-    from warden.runlog.render import render_run
+    from warden.runlog.site import list_runs
 
     s = load_settings()
-    if run_id is None:
-        runs = (
-            sorted(p.name for p in s.runs_dir.iterdir() if p.is_dir())
-            if s.runs_dir.exists()
-            else []
-        )
-        if not runs:
-            fail("no runs yet", fix="warden run --demo")
-        run_id = runs[-1]
-    out = render_run(s.runs_dir, run_id)
-    print(out)
+    known = list_runs(s.runs_dir)
+    ids = list(run_ids or []) + ([run_id] if run_id else [])
+    if all_runs:
+        ids = known
+    if not known and not ids:
+        fail("no runs yet", fix="warden run --demo")
+    if not ids:
+        ids = known[-1:]
+    missing = [i for i in ids if i not in known]
+    if missing:
+        fail(f"no run {missing[0]} under {s.runs_dir}", fix=f"ls {s.runs_dir}", code=2)
+
+    if out is not None:
+        from warden.runlog.site import build_site
+
+        for warning in build_site(s.runs_dir, ids, out, gif=gif):
+            _err(f"warning: {warning}")
+        _err(f"wrote {len(ids)} run page(s) to {out}")
+        print(out / "index.html")
+        return
+
+    from warden.runlog.gif import GifUnavailableError
+    from warden.runlog.render import render_run
+    from warden.runlog.site import write_gif
+
+    for rid in ids:
+        has_gif = False
+        if gif:
+            try:
+                _err(f"wrote {write_gif(s.runs_dir, rid)}")
+                has_gif = True
+            except GifUnavailableError as exc:
+                _err(f"warning: {exc}; skipped timeline.gif → {exc.fix}")
+        print(render_run(s.runs_dir, rid, has_gif=has_gif))
 
 
 if __name__ == "__main__":

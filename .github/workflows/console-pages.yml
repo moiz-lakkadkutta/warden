@@ -1,0 +1,40 @@
+# Publishes the committed console site (site/) to GitHub Pages.
+# runs/ is gitignored, so the site is generated locally and committed:
+#   uv run warden console <run-id>... --out site
+# One-time setup (repo admin): Settings → Pages → Source: GitHub Actions, or
+#   gh api -X POST repos/<owner>/<repo>/pages -f build_type=workflow
+name: console-pages
+on:
+  push:
+    branches: [main]
+    paths: ["site/**", ".github/workflows/console-pages.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: console-pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: site/ must have an index and a page per run
+        run: |
+          test -f site/index.html
+          test -f site/.nojekyll
+          ls site/*/index.html
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v4
