@@ -16,6 +16,7 @@ from warden.sandbox.box import Box, RunResult
 from warden.sandbox.fake import FakeBackend
 from warden.schemas import Candidate
 from warden.verify.gate import SWE_COMMANDS, run_gate
+from warden.verify.tail import keep_tail
 from warden.verify.theater import TheaterResult
 from warden.verify.verifier import decide
 
@@ -262,7 +263,7 @@ def test_swe_gate_runs_only_the_suite_and_reports_the_rest_not_verified(log: Eve
     cand = Box.from_ref(backend, "task", log, phase="verify")
     backend.images[cand.uuid].suite_counts = {"passed": 7}
     gate = run_gate(cand, log, commands=replace(SWE_COMMANDS, suite="pytest tests/a.py"))
-    assert backend.calls == ["pytest tests/a.py"]
+    assert backend.calls == [keep_tail("pytest tests/a.py")]  # only the suite, its tail kept
     assert set(gate.skipped) == {"mypy", "ruff", "alembic", "openapi"}
     assert {f"{c} (not configured)" for c in gate.skipped} <= set(gate.not_verified)
     assert gate.ok
