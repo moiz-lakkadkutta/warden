@@ -8,6 +8,7 @@ from typing import Any
 from warden.runlog.events import EventLog
 from warden.sandbox.box import Box
 from warden.verify.regression import regression_check, related_tests
+from warden.verify.tail import TAIL_BYTES
 
 CMD = "pytest -rA -p no:cacheprovider"
 T1 = "tests/plugins_t/test_telegrafmonitoring.py"
@@ -90,6 +91,7 @@ def test_a_test_green_on_base_and_red_on_candidate_is_a_regression(tmp_path: Pat
     assert copy["image"] == "cand" and set(copy["files"]) == {T1, T2}
     pytest_runs = [r for r in stub.runs if "pytest" in r["shell"]]
     assert all(r["shell"].startswith("testbed-env sh -c '") for r in pytest_runs)
+    assert all("; exit $rc'" in r["shell"] for r in pytest_runs)  # their tails are kept
     assert all(r["cwd"] == "/testbed" for r in pytest_runs)
 
 
@@ -123,6 +125,20 @@ def test_timeout_is_inconclusive(tmp_path: Path) -> None:
     res = regression_check(base, cand, test_cmd=CMD, cwd="/testbed", timeout=60)
     assert res is not None and res.inconclusive is True
     assert all(r.get("timeout") == 60 for r in res_runs(base) if "pytest" in r["shell"])
+
+
+def test_a_node_scrolled_out_of_a_cut_tail_is_not_a_regression(tmp_path: Path) -> None:
+    """Run 20261014-123938-6f4c: long -rA output; a node absent from one side's (full) tail is
+    unknown, not red. Without the cut, a vanished node still counts as red."""
+    pad = "x" * TAIL_BYTES + "\n"
+    out = f"{pad}PASSED {T1}::T::test_init\nFAILED {T2}::test_old\n"  # test_notify cut off
+    base, cand = _boxes(tmp_path, ShellStub(_rules(out)))
+    res = regression_check(base, cand, test_cmd=CMD, cwd="/testbed")
+    assert res is not None and res.broken == [] and res.changed_expectations == []
+    short = f"PASSED {T1}::T::test_init\nFAILED {T2}::test_old\n"
+    base, cand = _boxes(tmp_path, ShellStub(_rules(short)))
+    res = regression_check(base, cand, test_cmd=CMD, cwd="/testbed")
+    assert res is not None and res.changed_expectations == [f"{T1}::T::test_notify"]
 
 
 def res_runs(box: Box) -> list[dict[str, Any]]:
