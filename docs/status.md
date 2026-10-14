@@ -97,8 +97,8 @@ and tests, OpenAPI drift, Docker build). #220 failed lint; #221 is what Warden's
 
 ### 1c. D3 pilot (2026-10-14): 6 of 10 tasks before the $5 budget stopped it
 
-`warden eval --n 10 --seed 7`, cap $1/task. Results are in `evals/swe_rebench/results.csv`; the
-three stopped attempts are under `attempts/`.
+`warden eval --n 10 --seed 7`, cap $1/task. Results are in
+`evals/swe_rebench/attempts/results-2026-10-14-pilot-1.csv`; the three stopped attempts are there too.
 
 | task | verdict | hidden tests | turns | $ |
 |---|---|---|---|---|
@@ -121,6 +121,37 @@ three stopped attempts are under `attempts/`.
   task install, and sandbox timeouts → exit 124. All 10 unfixed bases were then verified live
   (F2P fails, 606/606 P2P pass).
 - **Spend 2026-10-14: $4.12** in total, within the $5 approved.
+
+### 1d. D3 pilot 2 (2026-10-14): history compaction, all 10 tasks for $1.33
+
+Same 10 tasks (`--seed 7`, cap $1/task, 40 turns) after `09f44fd` (old tool output and old
+`write_file` content elided from the implementer history). Results: `evals/swe_rebench/results.csv`.
+
+| task | verdict | hidden tests | turns | $ |
+|---|---|---|---|---|
+| MatterMiners__tardis-77 | PASS | **not resolved (false PASS)** | 32 | 0.09 |
+| PennyLaneAI__pennylane-5831 | PASS | resolved | 10 | 0.07 |
+| SpikeInterface__spikeinterface-2775 | PASS | **not resolved (false PASS)** | 10 | 0.06 |
+| astropy__photutils-1956 | FAIL | not resolved | 40 (budget) | 0.22 |
+| gmr__pamqp-52 | FAIL | **resolved (false FAIL)** | 40 (budget) | 0.41 |
+| iossifovlab__gpf-446 | FAIL | not resolved | 40 (budget) | 0.18 |
+| joshuadavidthomas__django-bird-58 | FAIL | not resolved (theater caught) | 35 | 0.12 |
+| planetlabs__planet-client-python-978 | PASS | resolved | 14 | 0.09 |
+| python-wheel-build__fromager-352 | PASS | **not resolved (false PASS)** | 8 | 0.03 |
+| smok-serwis__coolamqp-28 | FAIL | **resolved (false FAIL)** | 10 | 0.05 |
+
+- **Resolved 4/10** (pilot 1: 1/6). **$0.13/task**, $1.33 total (pilot 1: $0.69/task). Peak
+  prompt for tardis 10.5k tokens (was 27k). Compaction fixed the cost driver.
+- **Verdicts: 3 false PASS of 5 PASS** (tardis, spikeinterface, fromager). The model fixed its own
+  reading of the issue; the hidden tests check something the issue text doesn't spell out, or
+  arrive with the test patch. This is what `fix/verifier-false-pass` (regression check + spec
+  review) targets.
+- **2 false FAILs, both "not shown to work", not a rejected verified fix.** pamqp: 40/40 turns,
+  no tests written; the leftover diff happens to pass. coolamqp: the new test sits in
+  `tests/test_clustering/test_a.py`, which hangs (likely needs an AMQP broker) until the gate's
+  1800 s timeout; 3885 s wall-clock for one task. Follow-up: a shorter suite timeout for the
+  `swe` profile, and a hung suite reported as inconclusive rather than red.
+- **Spend 2026-10-14: $5.45** in total ($4.12 before pilot 2 + $1.33).
 
 ### 1a. Earlier notes: blocked by Token Factory billing (resolved)
 
