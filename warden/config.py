@@ -71,6 +71,14 @@ class Settings(BaseSettings):
     runs_dir: Path = Field(default=Path("runs"), alias="WARDEN_RUNS_DIR")
     # Verifier's spec review: one VERDICT call comparing the diff with the issue's stated behaviours
     spec_check: bool = Field(default=True, alias="WARDEN_SPEC_CHECK")
+    # The repo's own test command (no file args). Set: it is the gate's suite and the regression
+    # check's command, whatever the profile. "" = the profile's suite, no regression check.
+    test_cmd: str = Field(default="", alias="WARDEN_TEST_CMD")
+    # Branch fix PRs target for live issues (an external `--repo` uses its default branch).
+    base_branch: str = Field(default="main", alias="WARDEN_BASE_BRANCH")
+    # Markdown file for the PR body ($evidence, $disclosure, $issue, $title, $repo, $run_id,
+    # $models); "" = evidence table + AI disclosure. Without $disclosure, it is appended.
+    pr_template: str = Field(default="", alias="WARDEN_PR_TEMPLATE")
 
     def model_for(self, role: Role) -> str:
         return {

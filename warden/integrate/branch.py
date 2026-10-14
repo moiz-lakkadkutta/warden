@@ -8,7 +8,9 @@ Branches on the target repo:
   warden/fix-<issue>-<run_id>   the fix, one commit on top of the base
   warden/base-<sha7>            for replays of closed issues: the pre-fix commit, so the draft
                                 PR shows only Warden's change (a PR against main would not)
-Live issues use `main` as the base.
+Live issues use `base_branch` (default `main`) as the base. When the user cannot push to the
+target repo the fix branch goes to `push_url` (their fork, see fork.py) instead of origin; a
+replay's base branch cannot live in a fork, so replays need push access to the target.
 """
 
 from __future__ import annotations
@@ -67,10 +69,15 @@ def push_fix_branch(
     base_rev: str | None,
     cache_dir: Path,
     remote_url: str | None = None,
+    push_url: str | None = None,
+    base_branch: str = "main",
     runner: Runner = subprocess.run,
 ) -> PushedBranch:
-    """Apply `patch` on `base_rev` (or origin/main) in a throwaway worktree of a cached clone and
-    push `warden/fix-<issue>-<run_id>`; for a replay also push `warden/base-<sha7>`."""
+    """Apply `patch` on `base_rev` (or origin/<base_branch>) in a throwaway worktree of a cached
+    clone and push `warden/fix-<issue>-<run_id>` to origin, or to `push_url` (a fork) when given;
+    for a replay also push `warden/base-<sha7>` to origin."""
+    if push_url is not None and base_rev is not None:
+        raise ValueError("a replay pushes warden/base-<sha> to the target: needs push access")
     url = remote_url or f"https://github.com/{repo}.git"
     if not (cache_dir / ".git").exists() and not (cache_dir / "HEAD").exists():
         cache_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -85,8 +92,8 @@ def push_fix_branch(
     _git(runner, cache_dir, "fetch", "-q", "origin")
 
     if base_rev is None:
-        base = "main"
-        start = _git(runner, cache_dir, "rev-parse", "--verify", "origin/main^{commit}")
+        base = base_branch
+        start = _git(runner, cache_dir, "rev-parse", "--verify", f"origin/{base}^{{commit}}")
     else:
         start = _git(runner, cache_dir, "rev-parse", "--verify", f"{base_rev}^{{commit}}")
         base = f"warden/base-{start[:7]}"
@@ -118,7 +125,7 @@ def push_fix_branch(
         finally:
             patch_file.unlink(missing_ok=True)
         sha = _git(runner, worktree, "rev-parse", "HEAD")
-        _git(runner, worktree, "push", "-q", "origin", f"HEAD:refs/heads/{head}")
+        _git(runner, worktree, "push", "-q", push_url or "origin", f"HEAD:refs/heads/{head}")
     finally:
         runner(
             ["git", "-C", str(cache_dir), "worktree", "remove", "--force", str(worktree)],
