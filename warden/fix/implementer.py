@@ -278,6 +278,16 @@ IDLE_NUDGE = (
 )
 
 
+# Finish nudge. Pilot 3: fromager's new tests were green at turn 10 and the implementer never
+# called `finish`; 7 of 10 runs spent every turn. Once a test run exits 0 with new tests written
+# and no edit since, FINISH_NUDGE_AFTER more turns without `finish` get one note (once a run).
+FINISH_NUDGE_AFTER = 2
+FINISH_NUDGE = (
+    "Your new tests pass. If the fix is complete, call finish now; otherwise say what's left."
+)
+_TEST_CMD = re.compile(r"(?<![\w.-])(pytest|py\.test|unittest|tox|nox)(?![\w-])")
+
+
 @dataclass(frozen=True)
 class _Served:
     first: int
@@ -450,6 +460,8 @@ def run_implementer(
     base_tests: dict[str, set[str]] = {}  # test function names per test file on base
     memory = ReadMemory(root)
     idle = 0  # tool turns since the last write_file / run_shell
+    green_at: int | None = None  # turn of the last passing test run with no edit since
+    finish_nudged = False
 
     def visible(idx: int) -> bool:
         return _visible(messages, idx)
@@ -566,6 +578,11 @@ def run_implementer(
             idle = 0 if mutating else idle + 1
             if name == "run_shell" and result.exit_code is not None:
                 memory.forget(None)  # a command may have rewritten any file
+                command = args.get("command") if isinstance(args, dict) else None
+                if isinstance(command, str) and _TEST_CMD.search(command):
+                    green_at = turns if result.exit_code == 0 and tests_added else None
+            if edit_path is not None and result.ok:
+                green_at = None  # an edit after the green run: it no longer speaks for the fix
             if wanted is not None and result.ok and result.lines and result.total_lines is not None:
                 memory.record(
                     wanted[0], *result.lines, result.total_lines, turns, len(messages) - 1
@@ -596,6 +613,17 @@ def run_implementer(
             note("nudge", idle=idle, tool_turns=turns)
             hooks.step(f"nudge: {idle} turns without an edit")
             idle = 0
+        elif (
+            report is None
+            and turns < max_tool_turns
+            and not finish_nudged
+            and green_at is not None
+            and turns - green_at >= FINISH_NUDGE_AFTER
+        ):
+            messages.append({"role": "user", "content": FINISH_NUDGE})
+            note("finish_nudge", green_turn=green_at, tool_turns=turns)
+            hooks.step(f"nudge: tests green since turn {green_at}, no finish")
+            finish_nudged = True
 
     if report is None:
         note("budget", tool_turns=turns)
