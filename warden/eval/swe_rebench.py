@@ -407,7 +407,10 @@ def run_task(task: Task, settings: Settings, *, progress: Any = None) -> Row:
             live_steps(),
             hunt=lambda ctx: IssueRef(issue=0, title=issue.title),
             verify=lambda ctx, plan, cand: verify_candidate(
-                ctx, cand, replace(SWE_COMMANDS, suite=suite_command(task, cand.tests_added))
+                ctx,
+                cand,
+                replace(SWE_COMMANDS, suite=suite_command(task, cand.tests_added)),
+                regression_cmd=task.test_cmd,
             ),
         )
         run_pipeline(
