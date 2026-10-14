@@ -183,10 +183,15 @@ def evidence_table(
     link = f" [↗]({log_url})" if log_url else ""
     if verdict.theater_failed_on_base:
         theater = "FAIL — as required"
+    elif verdict.theater_invalid:
+        theater = "invalid repro — red for the wrong reason or with the fix"
     elif verdict.theater_inconclusive:
         theater = "inconclusive — not proof"
     else:
         theater = "PASSED — tests are theater"
+    theater += "".join(  # per new test: why it does or does not count as a repro
+        f"<br>`{n.rsplit('/', 1)[-1]}`: {why}" for n, why in list(verdict.theater_tests.items())[:6]
+    )
     suite = ", ".join(f"{v} {k}" for k, v in verdict.suite.items()) or "not run"
     race = (
         f"{verdict.race.threads} threads → {verdict.race.effects_on_candidate} effect(s)"

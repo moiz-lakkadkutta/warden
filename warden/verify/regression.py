@@ -6,7 +6,9 @@ changed (`git grep` on the base, name matches first, capped). The base's version
 copied onto a fork of the candidate, so a candidate that edited a test cannot hide a regression by
 weakening it. A red test in a file the candidate itself edited is a *changed expectation* (the
 issue may ask for new behaviour); a red test in a file it did not touch is *broken*. No per-test
-outcomes on either side, or a timeout, is inconclusive — never proof either way.
+outcomes on either side, or a timeout, is inconclusive — never proof either way. Both runs keep
+the tail of their output (verify/tail.py: the sandbox keeps only the head of long output, and the
+`-rA` lines are last); when a tail was cut, a node missing from one side is not compared.
 
 Hidden grading data (a task's test patch, FAIL_TO_PASS / PASS_TO_PASS) is never an input here.
 """
@@ -18,6 +20,7 @@ import shlex
 from dataclasses import dataclass, field
 
 from warden.sandbox.box import TIMEOUT_EXIT, Box
+from warden.verify.tail import keep_tail, was_cut
 from warden.verify.theater import parse_outcomes
 
 MAX_FILES = 8
@@ -102,9 +105,9 @@ def regression_check(
         f: base.run(f"cat {shlex.quote(f)}", cwd=cwd, keep=False).stdout.encode() for f in files
     }
     command = f"{test_cmd} {' '.join(shlex.quote(f) for f in files)}"
-    on_base = base.run(wrapped(command), cwd=cwd, keep=False, timeout=timeout)
+    on_base = base.run(wrapped(keep_tail(command)), cwd=cwd, keep=False, timeout=timeout)
     probe = candidate.copy_in(contents, cwd=cwd)
-    on_cand = probe.run(wrapped(command), cwd=cwd, keep=False, timeout=timeout)
+    on_cand = probe.run(wrapped(keep_tail(command)), cwd=cwd, keep=False, timeout=timeout)
 
     before, after = parse_outcomes(on_base.stdout), parse_outcomes(on_cand.stdout)
     output = (
@@ -114,9 +117,12 @@ def regression_check(
         return RegressionResult(tuple(files), before, after, inconclusive=True, output=output)
 
     edited = set(changed)
+    cut = was_cut(on_base.stdout) or was_cut(on_cand.stdout)
     broken: list[str] = []
     changed_exp: list[str] = []
     for node, outcome in before.items():
+        if cut and node not in after:
+            continue  # scrolled out of one tail: unknown, not red
         if outcome != "passed" or after.get(node, "error") not in _RED:
             continue
         (changed_exp if node.split("::", 1)[0] in edited else broken).append(node)

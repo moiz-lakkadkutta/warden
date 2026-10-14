@@ -2,6 +2,8 @@
   "decision": "PASS",
   "theater_failed_on_base": true,
   "theater_inconclusive": false,
+  "theater_invalid": false,
+  "theater_tests": {},
   "suite": {
     "passed": 214,
     "failed": 0

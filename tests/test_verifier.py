@@ -171,3 +171,25 @@ def test_a_timeout_beside_a_real_failure_is_a_rejection() -> None:
 def test_a_red_suite_is_not_inconclusive() -> None:
     v = decide(_cand(), _theater(), _gate(1, suite={"passed": 1, "failed": 2}))
     assert v.decision == "FAIL" and not v.inconclusive
+
+
+def test_invalid_repro_is_fail_and_carries_the_per_test_reasons() -> None:
+    """Run 20261014-123340-85cd: red on base, but red with the fix too — not a repro."""
+    reasons = {
+        "t.py::test_a": "invalid: fails on base (AssertionError), and still fails with the fix",
+        "t.py::test_b": "guard: passes on base",
+    }
+    theater = TheaterResult(
+        failed_on_base=False,
+        exit_code=1,
+        stdout="",
+        base_uuid="b",
+        probe_uuid="p",
+        reasons=reasons,
+        invalid=True,
+    )
+    v = decide(_cand(), theater, _green())
+    assert v.decision == "FAIL" and v.theater_invalid and not v.theater_failed_on_base
+    assert not v.inconclusive  # checked and rejected, not "could not check"
+    assert v.theater_tests == reasons
+    assert any(r.startswith("theater: invalid repro — t.py::test_a: invalid") for r in v.reasons)

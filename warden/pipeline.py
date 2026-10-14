@@ -468,7 +468,18 @@ def verify_candidate(
             for f in files
         }
         theater = theater_check(
-            base, new_tests, node_ids=cand.tests_added, cwd=s.workdir, wrap=s.shell_wrap
+            base,
+            new_tests,
+            node_ids=cand.tests_added,
+            cwd=s.workdir,
+            wrap=s.shell_wrap,
+            candidate=candidate,
+            issue_text=f"{ctx.issue.title}\n{ctx.issue.body}" if ctx.issue else "",
+        )
+        ctx.log.artifact(
+            "theater.txt",
+            "".join(f"{n}: {r}\n" for n, r in theater.reasons.items())
+            + f"\n# base (exit {theater.exit_code})\n{theater.stdout}",
         )
         ctx.log.note("verify", f"theater: {theater.label}")
         ctx.progress.step(f"theater: {theater.label}")
