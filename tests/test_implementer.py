@@ -207,7 +207,8 @@ def test_events(log: EventLog) -> None:
 
 def test_budget_exhaustion(log: EventLog) -> None:
     env = _setup(log)
-    script = [turn(tool_call("read_file", path="REF")) for _ in range(25)]
+    # list_files: a repeated read_file would be answered from the read cache, not dispatched
+    script = [turn(tool_call("list_files", path=".")) for _ in range(25)]
     llm, cand = _run(env, script)
     assert cand.tool_turns == 25 == env.dispatcher.calls
     assert cand.image_uuid == env.base.uuid
@@ -712,8 +713,9 @@ def test_compact_history_leaves_short_outputs_and_short_histories_alone() -> Non
 
 def test_the_model_is_sent_the_compacted_history(log: EventLog) -> None:
     env = _setup(log)
-    env.image.files["/app/big.py"] = ("z" * 3000 + "\n").encode()
-    reads = [turn(tool_call("read_file", path="big.py")) for _ in range(8)]
+    for i in range(8):  # distinct files: a repeated read would be answered by the read cache
+        env.image.files[f"/app/big{i}.py"] = ("z" * 3000 + "\n").encode()
+    reads = [turn(tool_call("read_file", path=f"big{i}.py")) for i in range(8)]
     llm, _ = _run(env, [*reads, finish_turn()])
     last = llm.calls[-1].messages
     tool_msgs = [m for m in last if m["role"] == "tool"]

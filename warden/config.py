@@ -60,7 +60,14 @@ class Settings(BaseSettings):
     # Limits
     max_forks: int = Field(default=4, alias="WARDEN_MAX_FORKS")
     max_usd_per_issue: float = Field(default=3.0, alias="WARDEN_MAX_USD_PER_ISSUE")
-    max_tool_turns: int = Field(default=40, alias="WARDEN_MAX_TOOL_TURNS")
+    # icalendar#1928 needed 52 turns to finish; 25 and 40 both ran out mid-fix
+    max_tool_turns: int = Field(default=60, alias="WARDEN_MAX_TOOL_TURNS")
+    # Implementer read-loop guards: after this many tool turns in a row without write_file or
+    # run_shell the loop injects a "now edit or run tests" nudge (0 = never)
+    idle_nudge_after: int = Field(default=8, ge=0, alias="WARDEN_IDLE_NUDGE_AFTER")
+    # Re-reading an unchanged file/range still in the model's context gets a short "you already
+    # have it" reply instead of the content again
+    read_cache: bool = Field(default=True, alias="WARDEN_READ_CACHE")
     base_image: str = Field(default="warden/fabric-base:latest", alias="WARDEN_BASE_IMAGE")
     workdir: str = Field(default="/src", alias="WARDEN_WORKDIR")
     gate_profile: str = Field(default="fabric", alias="WARDEN_GATE_PROFILE")
