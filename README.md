@@ -47,7 +47,7 @@ The implementer's word is never evidence. A candidate is **FAIL** unless every r
 |---|---|---|
 | Theater | fork of the unfixed base + only the new test files | every new test passes without the fix |
 | Gate | disposable forks of the candidate | suite red, or a configured lint / type / migration / OpenAPI check red |
-| Existing tests | base and candidate, with the **base's** test files | a test green on base is red on the candidate |
+| Existing tests | base and candidate, with the **base's** test files named after or mentioning a changed module | a test green on base is red on the candidate (no related test file: not verified, and a concern) |
 | Spec review | one Ultra call over the issue + diff | a behaviour the issue states is not implemented, *and* the model's quote of it is found verbatim in the issue |
 
 Inconclusive results (collection errors, timeouts, unquotable claims) are concerns, never proof.
