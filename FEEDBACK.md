@@ -65,6 +65,16 @@ Every entry: date · tool · what happened · numbers · what would have helped.
   fail on the base (spectree-64: F2P 0/1, P2P 6/6) and pass with the gold patch (1/1, 6/6), 2.4 s
   per grade.
 
+- 2026-10-14 · eval images · Four image quirks the harness has to absorb (none documented):
+  (1) the dataset's FAIL_TO_PASS/PASS_TO_PASS ids are cut at the first space (pennylane
+  `test_label[op0-None-Exp((2+3j)`), so you must run test FILES and match by first token, as the
+  official log parser does; (2) on some images the `pytest` script's shebang names an env without
+  the package installed, while `python -m pytest` works; (3) editable installs can point outside
+  /testbed (spikeinterface: `__editable__` .pth → `/spikeinterface/src`), so re-run
+  `install_config.install` first; (4) a run past its `timeout` raises `OperationTimedOutError`
+  from `.wait()` rather than returning an exit code. With (1)–(3) handled, all 10 sampled bases
+  grade as expected (F2P fails, 606/606 P2P pass, 4–18 s to prepare).
+
 ## Token Factory inference
 
 - 2026-10-04 · A5 · `response_format={"type": "json_schema", "strict": true}` with the `Plan` schema

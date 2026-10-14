@@ -1,0 +1,10 @@
+MatterMiners__tardis-77
+PennyLaneAI__pennylane-5831
+SpikeInterface__spikeinterface-2775
+astropy__photutils-1956
+gmr__pamqp-52
+iossifovlab__gpf-446
+joshuadavidthomas__django-bird-58
+planetlabs__planet-client-python-978
+python-wheel-build__fromager-352
+smok-serwis__coolamqp-28

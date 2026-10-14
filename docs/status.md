@@ -95,6 +95,33 @@ and tests, OpenAPI drift, Docker build). #220 failed lint; #221 is what Warden's
 - **Next:** the 10-task pilot, ≈ $2–5 at #196's $0.17/task, capped at $1/task. **It needs Moiz's
   OK.** Then E1 (50 tasks).
 
+### 1c. D3 pilot (2026-10-14): 6 of 10 tasks before the $5 budget stopped it
+
+`warden eval --n 10 --seed 7`, cap $1/task. Results are in `evals/swe_rebench/results.csv`; the
+three stopped attempts are under `attempts/`.
+
+| task | verdict | hidden tests | turns | $ |
+|---|---|---|---|---|
+| MatterMiners__tardis-77 | FAIL | not resolved | 40 (budget) | 0.21 |
+| PennyLaneAI__pennylane-5831 | ERROR (cost cap) | — | — | 0.98 |
+| SpikeInterface__spikeinterface-2775 | PASS | **not resolved (false PASS)** | 12 | 0.08 |
+| astropy__photutils-1956 | FAIL | not resolved | 40 (budget) | 0.53 |
+| gmr__pamqp-52 | PASS | **resolved** | 39 | 0.93 |
+| iossifovlab__gpf-446 | FAIL | not resolved | 40 (budget) | 0.48 |
+
+- **Resolved 1/6.** Verdicts: 2 PASS (1 false), 3 correct FAILs, 1 cost-cap error. An earlier
+  attempt resolved pennylane for $0.08, so variance between runs is large.
+- **Cost driver: implementer context growth.** Prompts reach 155–173k tokens by turn 34–40
+  because every earlier `read_file` result is re-sent on every call. That is 3.0M prompt tokens
+  for pennylane, against 0.6M for tardis, which mostly ran shell commands. Next fix (no spend
+  needed): elide old tool outputs from the history.
+- **Turn budget:** 3/6 tasks used all 40 turns.
+- **Four harness bugs fixed today**, each found by a stopped attempt: class-qualified node ids,
+  grading by files (dataset ids are cut at spaces), a `python -m pytest` shim, re-running the
+  task install, and sandbox timeouts → exit 124. All 10 unfixed bases were then verified live
+  (F2P fails, 606/606 P2P pass).
+- **Spend 2026-10-14: $4.12** in total, within the $5 approved.
+
 ### 1a. Earlier notes: blocked by Token Factory billing (resolved)
 
 `warden run --issue 196 --at 43f3851^ --yes` (run `20261010-111217-7c89`) fetched the issue, then
