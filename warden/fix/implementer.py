@@ -23,6 +23,7 @@ from typing import Any, Protocol, runtime_checkable
 from pydantic import ValidationError
 
 from warden.config import Role
+from warden.fix.nodes import test_nodes
 from warden.fix.tools import TOOL_SCHEMAS, ToolDispatcher, as_message, strict_schema
 from warden.llm.client import ChatResult
 from warden.llm.cost import usd_for
@@ -315,9 +316,7 @@ def run_implementer(
                 if key not in on_base:
                     base_file = _cat(base, path, root)
                     on_base[key] = base_file.ok
-                    base_tests[key] = (
-                        set(_TEST_DEF.findall(base_file.stdout)) if base_file.ok else set()
-                    )
+                    base_tests[key] = set(test_nodes(base_file.stdout)) if base_file.ok else set()
             result = dispatch.dispatch(box, name, args)
             box = result.box
             turns += 1
@@ -331,7 +330,7 @@ def run_implementer(
                     if key not in tests_added:
                         tests_added.append(key)
                 elif is_test_write:  # existing file: each new test function is a node id
-                    for name_ in _TEST_DEF.findall(str(args["content"])):
+                    for name_ in test_nodes(str(args["content"])):
                         node = f"{key}::{name_}"
                         if name_ not in base_tests[key] and node not in tests_added:
                             tests_added.append(node)

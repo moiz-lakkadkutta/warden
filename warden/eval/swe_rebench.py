@@ -37,14 +37,16 @@ ROWS_URL = "https://datasets-server.huggingface.co/rows"
 PAGE = 100  # datasets-server maximum
 
 WORKDIR = "/testbed"
-ENV_BIN = "/opt/miniconda3/envs/testbed/bin"
+ENV_BINS = ("/opt/miniconda3/envs/testbed/bin", "/opt/conda/envs/testbed/bin")  # images vary
 WRAPPER = "/usr/local/bin/testbed-env"
 WRAP = "testbed-env sh -c"
 WRAPPER_SCRIPT = (
     "#!/bin/sh\n"
     "# Warden: run a command with the task's conda env first on PATH (when the image has one).\n"
-    f'if [ -d {ENV_BIN} ]; then PATH="{ENV_BIN}:$PATH"; export PATH; fi\n'
-    'exec "$@"\n'
+    + "".join(
+        f'if [ -d {d} ]; then PATH="{d}:$PATH"; export PATH; fi\n' for d in reversed(ENV_BINS)
+    )
+    + 'exec "$@"\n'
 )
 TEST_PATCH = "/tmp/warden-test.patch"
 GRADE_TIMEOUT = 1800
@@ -253,6 +255,7 @@ class Grade:
     p2p_passed: int
     exit_code: int
     applied: bool
+    output: str = ""  # tail of the grading run, for results that need explaining
 
 
 def grade(candidate: Box, task: Task) -> Grade:
@@ -272,6 +275,7 @@ def grade(candidate: Box, task: Task) -> Grade:
         p2p_passed=p2p,
         exit_code=res.exit_code,
         applied=bool(outcomes) or res.exit_code in (0, 1),
+        output=(res.stdout + res.stderr)[-4000:],
     )
 
 
@@ -398,7 +402,9 @@ def run_task(task: Task, settings: Settings, *, progress: Any = None) -> Row:
         cand = Candidate.model_validate_json((artifacts / "candidate.json").read_text("utf-8"))
         verdict = Verdict.model_validate_json((artifacts / "verdict.json").read_text("utf-8"))
         g = grade(base.sibling(cand.image_uuid), task)
-        log.emit("verify", "note", {"grade": asdict(g), "task": task.instance_id})
+        log.artifact("grade.txt", f"$ {grade_command(task)}\n\n{g.output}")
+        summary = {k: v for k, v in asdict(g).items() if k != "output"}
+        log.emit("verify", "note", {"grade": summary, "task": task.instance_id})
         return make_row(
             task,
             verdict=verdict.decision,

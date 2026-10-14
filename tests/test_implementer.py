@@ -335,6 +335,38 @@ def test_tests_added_to_existing_file_accumulate_across_writes(log: EventLog) ->
     assert cand.tests_added == ["tests/test_old.py::test_y", "tests/test_old.py::test_x"]
 
 
+def test_tests_added_inside_a_class_are_class_qualified_node_ids(log: EventLog) -> None:
+    # SWE-rebench MatterMiners__tardis-77: `path::test_x` for a method in TestTelegraf made
+    # pytest exit 4 ("not found"), so the theater check could not run and the verdict was PWC
+    env = _setup(log)
+    env.image.files["/app/tests/test_old.py"] = (
+        b"class TestOld:\n    def test_z(self):\n        pass\n"
+    )
+    grown = (
+        "class TestOld:\n    def test_z(self):\n        pass\n\n"
+        "    def test_y(self):\n        pass\n\n"
+        "    class TestInner:\n        async def test_w(self):\n            pass\n\n\n"
+        "def test_top():\n    pass\n"
+    )
+    script = [turn(tool_call("write_file", path="tests/test_old.py", content=grown)), finish_turn()]
+    _, cand = _run(env, script)
+    assert cand.tests_added == [
+        "tests/test_old.py::TestOld::test_y",
+        "tests/test_old.py::TestOld::TestInner::test_w",
+        "tests/test_old.py::test_top",
+    ]
+
+
+def test_test_nodes_falls_back_to_bare_names_when_the_file_does_not_parse() -> None:
+    from warden.fix.implementer import test_nodes
+
+    assert test_nodes("class T:\n    def test_a(self): pass\ndef test_b(): pass\n") == [
+        "T::test_a",
+        "test_b",
+    ]
+    assert test_nodes("def test_a(:\n") == ["test_a"]
+
+
 def test_final_tests_run_through_dispatcher_workdir_and_wrap(log: EventLog) -> None:
     from warden.fix.tools import ToolDispatcher
 
