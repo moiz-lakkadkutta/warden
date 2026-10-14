@@ -66,7 +66,8 @@ the earlier ones. The verifier then picks one by a fixed rule, first difference 
 4. smaller diff (lines added + removed), then lower cost, then the earlier candidate
 
 A clean PASS (PASS with a theater-proven test) stops the run early: later candidates are skipped,
-since only a smaller diff could outrank it. A candidate is also skipped when the spend so far plus
+since only a smaller diff could outrank it. (The catch: a false PASS stops the run too, so
+best-of-N rescues runs that end in FAIL, not the verifier's own false PASSes.) A candidate is also skipped when the spend so far plus
 the costliest candidate so far would pass the per-issue cap; the cap covers all candidates
 together and is never caught. `verdict.json` lists every candidate with its verdict and why the
 winner won; the PR evidence table says "chosen from N candidates"; every event carries its

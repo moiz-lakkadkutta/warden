@@ -73,8 +73,8 @@ CSV_COLUMNS = (
     "usd",
     "seconds",
     "error",
-    # best-of-N (D4): candidates run, the one graded above, and every candidate the hidden tests
-    # accept (";"-joined), so a csv shows whether the verifier's ranking picked a resolving one
+    # best-of-N (D4): N asked for (some may be skipped), the one graded, and each candidate the
+    # hidden tests accept (";"-joined): did the verifier's ranking pick a resolving one?
     "candidates",
     "chosen",
     "resolved_candidates",
