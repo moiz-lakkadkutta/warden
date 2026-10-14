@@ -322,3 +322,68 @@ def test_classification_on_real_pytest_output(tmp_path: Path) -> None:
         nodes["guard"]: "guard: passes on base",
     }, proc.stdout
     assert res.failed_on_base is True  # one real repro; the invalid ones just do not count
+
+
+# Run 20261014-131452-cd9b (icalendar#1928): the implementer added a whole new test file, so
+# `tests_added` (the theater targets) was the *file*, while the -rA lines name its tests. The
+# verdict keyed theater_tests by the file with "no result on base" although all four passed.
+CD9B_FILE = "src/icalendar/tests/prop/recur/test_recur.py"
+CD9B_TESTS = [
+    f"{CD9B_FILE}::test_vrecur_to_jcal_freq_first",
+    f"{CD9B_FILE}::test_vrecur_to_xcal_freq_first",
+    f"{CD9B_FILE}::test_vrecur_to_ical_freq_first_regression",
+    f"{CD9B_FILE}::test_vrecur_other_keys_after_freq",
+]
+# verbatim from runs/20261014-131452-cd9b/artifacts/theater.txt
+CD9B_BASE_OUT = (
+    "....                                                                     [100%]\n"
+    "==================================== PASSES ====================================\n"
+    "=========================== short test summary info ============================\n"
+    + "".join(f"PASSED {t}\n" for t in CD9B_TESTS)
+    + "4 passed in 0.61s\n"
+)
+
+
+def test_file_target_maps_to_its_per_test_ids_cd9b(tmp_path: Path) -> None:
+    res = theater_check(
+        _box(tmp_path, PytestStub(CD9B_BASE_OUT, 0)),
+        {CD9B_FILE: b""},
+        node_ids=[CD9B_FILE],
+        cwd="/src",
+    )
+    assert res.reasons == {t: "guard: passes on base" for t in CD9B_TESTS}
+    assert res.failed_on_base is False and res.invalid is False and res.inconclusive is False
+    assert res.label == "PASSED on unfixed base — tests are theater"
+
+
+def test_file_target_with_a_test_red_on_base_is_a_repro(tmp_path: Path) -> None:
+    """The same file-target shape plus a FREQ-last test that fails on base, passes when fixed:
+    with the file as the target it used to be "no result" — a missed repro."""
+    last = f"{CD9B_FILE}::test_to_jcal_freq_last_in_source"
+    base_out = CD9B_BASE_OUT.replace(
+        "4 passed in 0.61s\n",
+        f"FAILED {last} - AssertionError: assert 'COUNT' == 'FREQ'\n1 failed, 4 passed in 0.7s\n",
+    )
+    fixed = "".join(f"PASSED {t}\n" for t in [*CD9B_TESTS, last]) + "5 passed in 0.6s\n"
+    stub = TwoBoxStub(base_out, 1, fixed, 0)
+    log = EventLog(tmp_path / "runs", "t")
+    res = theater_check(
+        Box(stub, "base", log),
+        {CD9B_FILE: b""},
+        node_ids=[CD9B_FILE],
+        candidate=Box(stub, "cand", log),
+    )
+    assert res.failed_on_base is True and res.invalid is False
+    assert res.reasons[last] == "repro: fails on base (AssertionError), passes with the fix"
+    assert CD9B_FILE not in res.reasons
+    assert all(res.reasons[t] == "guard: passes on base" for t in CD9B_TESTS)
+
+
+def test_a_file_target_and_its_own_node_are_not_counted_twice(tmp_path: Path) -> None:
+    node = CD9B_TESTS[0]
+    res = theater_check(
+        _box(tmp_path, PytestStub(CD9B_BASE_OUT, 0)),
+        {CD9B_FILE: b""},
+        node_ids=[CD9B_FILE, node],
+    )
+    assert list(res.reasons) == CD9B_TESTS

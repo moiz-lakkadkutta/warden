@@ -96,6 +96,20 @@ def parse_outcomes(output: str) -> dict[str, str]:
     return {node: kind.lower() for kind, node in _OUTCOME.findall(output)}
 
 
+def expand_targets(targets: list[str], outcomes: dict[str, str]) -> list[str]:
+    """The tests to classify: a file target stands for the node ids pytest reported under it
+    (run 20261014-131452-cd9b: a new file's four tests were filed as one "no result on base").
+    A file with no per-test line (a collection error, or no outcomes at all) stays itself; a
+    node listed next to its own file is not counted twice."""
+    out: list[str] = []
+    for t in targets:
+        nodes = [n for n in outcomes if "::" not in t and n.split("::", 1)[0] == t and "::" in n]
+        for n in nodes or [t]:
+            if n not in out:
+                out.append(n)
+    return out
+
+
 def _head(node: str) -> str:
     """The --tb section headline pytest prints for a node: `Class.test_x[p]`."""
     _, _, rest = node.partition("::")
@@ -184,10 +198,11 @@ def theater_check(
     outcomes = parse_outcomes(res.stdout)
     messages = failure_messages(res.stdout)
 
+    tests = expand_targets(targets, outcomes)
     base_red: dict[str, str] = {}  # node -> reason, for the red-for-the-issue ones
     reasons: dict[str, str] = {}
     any_red = False
-    for t in targets:
+    for t in tests:
         if outcomes:
             o = outcomes.get(t) or ("error" if outcomes.get(t.split("::", 1)[0]) == "error" else "")
         else:  # no per-test lines (e.g. the fake backend): the exit code speaks for every target
@@ -210,7 +225,7 @@ def theater_check(
     if candidate is not None and any_red:
         on_cand = candidate.run(command, cwd=cwd, keep=False)
         cand_outcomes = parse_outcomes(on_cand.stdout)
-        for t in targets:
+        for t in tests:
             if cand_outcomes:
                 c = cand_outcomes.get(t, "")
             else:
