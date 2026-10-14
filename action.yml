@@ -1,0 +1,254 @@
+name: Warden
+description: >-
+  Label an issue `warden` and get a draft PR: Nemotron plans and fixes it test-first in a Nebius
+  Sandbox, an adversarial verifier proves the tests are real, and the PR body carries the
+  evidence table. Money/tax/schema/security fixes are labelled PENDING-HUMAN. Never merges.
+author: Moiz Lakkadkutta
+branding:
+  icon: shield
+  color: green
+
+inputs:
+  nebius-api-key:
+    description: Nebius Token Factory API key (pass a secret).
+    required: true
+  nebius-project-id:
+    description: Nebius project id for Token Factory Sandboxes (pass a secret or variable).
+    required: true
+  tavily-api-key:
+    description: Tavily key; the planner cites documentation it finds (pass a secret).
+    required: true
+  base-image:
+    description: >-
+      Sandbox base image with this repo checked out at `workdir` and its test dependencies
+      installed (a Contree tag, or docker://registry/image:tag).
+    required: true
+  contree-base-url:
+    description: Token Factory Sandboxes endpoint.
+    required: false
+    default: https://api.tokenfactory.nebius.com/sandboxes
+  workdir:
+    description: Absolute repo root inside the base image.
+    required: false
+    default: /src
+  test-command:
+    description: The repo's test command, run by the verifier's gate (e.g. `pytest -q`).
+    required: false
+    default: ""
+  gate-profile:
+    description: "Gate command set: tests (only test-command) | generic | fabric."
+    required: false
+    default: tests
+  shell-wrap:
+    description: Prefix for every shell command in the sandbox (e.g. a script that starts services).
+    required: false
+    default: ""
+  max-usd:
+    description: Per-issue Token Factory cost cap in USD; the run stops cleanly when reached.
+    required: false
+    default: "2.0"
+  max-tool-turns:
+    description: Implementer tool-call budget (empty = Warden's default).
+    required: false
+    default: ""
+  planner-model:
+    description: Override WARDEN_PLANNER_MODEL (planner + verdict). Empty = Warden's default.
+    required: false
+    default: ""
+  implementer-model:
+    description: Override WARDEN_IMPLEMENTER_MODEL. Empty = Warden's default.
+    required: false
+    default: ""
+  tools-model:
+    description: Override WARDEN_TOOLS_MODEL. Empty = Warden's default.
+    required: false
+    default: ""
+  trigger-label:
+    description: The issue label that starts a run.
+    required: false
+    default: warden
+  github-token:
+    description: >-
+      Token for pushing the fix branch, opening the draft PR and commenting. The default
+      GITHUB_TOKEN works, but PRs it opens do not trigger your CI; use a GitHub App or
+      fine-grained token (contents, pull-requests, issues: write) if you want CI on the PR.
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  run-id:
+    description: Warden run id (also the uploaded artifact's suffix).
+    value: ${{ steps.run.outputs.run-id }}
+  exit-code:
+    description: "`warden run` exit code: 0 finished, 1 failed, 2 config, 3 not ready, 4 cost cap."
+    value: ${{ steps.run.outputs.exit-code }}
+  verdict:
+    description: PASS, PASS_WITH_CONCERNS or FAIL (empty when the run stopped early).
+    value: ${{ steps.run.outputs.verdict }}
+  pr-url:
+    description: The draft PR (empty when none was opened).
+    value: ${{ steps.run.outputs.pr-url }}
+  cost-usd:
+    description: Token Factory spend for this run.
+    value: ${{ steps.run.outputs.cost-usd }}
+
+runs:
+  using: composite
+  steps:
+    # Trust gate. Every value reaches the shell through env, never through ${{ }} in a script,
+    # so an issue title or label name cannot inject shell.
+    - name: Check trigger and actor
+      id: guard
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        EVENT_NAME: ${{ github.event_name }}
+        EVENT_ACTION: ${{ github.event.action }}
+        LABEL: ${{ github.event.label.name }}
+        TRIGGER: ${{ inputs.trigger-label }}
+        SENDER: ${{ github.event.sender.login }}
+        REPO: ${{ github.repository }}
+        IS_FORK: ${{ github.event.repository.fork }}
+      run: |
+        set -euo pipefail
+        if [ "$EVENT_NAME" != "issues" ] || [ "$EVENT_ACTION" != "labeled" ]; then
+          echo "::error::Warden runs on 'issues: [labeled]' only (got $EVENT_NAME/$EVENT_ACTION)"
+          exit 1
+        fi
+        if [ "$LABEL" != "$TRIGGER" ]; then
+          echo "::notice::label is not '$TRIGGER'; nothing to do"
+          echo "skip=true" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        if [ "$IS_FORK" = "true" ]; then
+          echo "::error::refusing to run in a fork; run Warden in the upstream repository"
+          exit 1
+        fi
+        # Labelling needs only triage access; running Warden spends credit and pushes a branch,
+        # so the person who added the label must have write access.
+        perm=$(gh api "repos/$REPO/collaborators/$SENDER/permission" --jq .permission || echo none)
+        case "$perm" in
+          admin|write) echo "$SENDER has $perm access" ;;
+          *) echo "::error::$SENDER has '$perm' access; only write/admin can start Warden"; exit 1 ;;
+        esac
+        echo "skip=false" >> "$GITHUB_OUTPUT"
+
+    - name: Install uv
+      if: steps.guard.outputs.skip == 'false'
+      uses: astral-sh/setup-uv@v6
+
+    - name: Install Warden
+      if: steps.guard.outputs.skip == 'false'
+      shell: bash
+      env:
+        WARDEN_SRC: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        uv python install 3.12
+        uv sync --project "$WARDEN_SRC" --frozen --no-dev
+        uv run --project "$WARDEN_SRC" --frozen --no-dev warden --help > /dev/null
+
+    - name: Prepare git and labels
+      if: steps.guard.outputs.skip == 'false'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        REPO: ${{ github.repository }}
+      run: |
+        set -euo pipefail
+        # Git on the runner pushes the fix branch with this token; no token enters a sandbox.
+        gh auth setup-git
+        # Warden labels risky fixes; `gh pr create --label` fails if the label does not exist.
+        gh label create PENDING-HUMAN --repo "$REPO" --color B60205 --force \
+          --description "Warden: money/tax/schema/security change; a human decides"
+
+    - name: Run Warden on the issue
+      id: run
+      if: steps.guard.outputs.skip == 'false'
+      shell: bash
+      env:
+        WARDEN_SRC: ${{ github.action_path }}
+        GH_TOKEN: ${{ inputs.github-token }}
+        ISSUE: ${{ github.event.issue.number }}
+        IN_NEBIUS_API_KEY: ${{ inputs.nebius-api-key }}
+        IN_NEBIUS_PROJECT_ID: ${{ inputs.nebius-project-id }}
+        IN_TAVILY_API_KEY: ${{ inputs.tavily-api-key }}
+        IN_CONTREE_BASE_URL: ${{ inputs.contree-base-url }}
+        IN_BASE_IMAGE: ${{ inputs.base-image }}
+        IN_WORKDIR: ${{ inputs.workdir }}
+        IN_TEST_CMD: ${{ inputs.test-command }}
+        IN_GATE_PROFILE: ${{ inputs.gate-profile }}
+        IN_SHELL_WRAP: ${{ inputs.shell-wrap }}
+        IN_MAX_USD: ${{ inputs.max-usd }}
+        IN_MAX_TOOL_TURNS: ${{ inputs.max-tool-turns }}
+        IN_PLANNER_MODEL: ${{ inputs.planner-model }}
+        IN_IMPLEMENTER_MODEL: ${{ inputs.implementer-model }}
+        IN_TOOLS_MODEL: ${{ inputs.tools-model }}
+      run: |
+        set -uo pipefail
+        export NEBIUS_API_KEY="$IN_NEBIUS_API_KEY" NEBIUS_PROJECT_ID="$IN_NEBIUS_PROJECT_ID"
+        export TAVILY_API_KEY="$IN_TAVILY_API_KEY" CONTREE_BASE_URL="$IN_CONTREE_BASE_URL"
+        export WARDEN_BASE_IMAGE="$IN_BASE_IMAGE" WARDEN_WORKDIR="$IN_WORKDIR"
+        export WARDEN_TEST_CMD="$IN_TEST_CMD" WARDEN_GATE_PROFILE="$IN_GATE_PROFILE"
+        export WARDEN_SHELL_WRAP="$IN_SHELL_WRAP" WARDEN_MAX_USD_PER_ISSUE="$IN_MAX_USD"
+        export WARDEN_RUNS_DIR="$RUNNER_TEMP/warden-runs" NO_COLOR=1
+        # Optional overrides: only when set, so Warden's own defaults (config.py) apply otherwise.
+        [ -n "$IN_MAX_TOOL_TURNS" ] && export WARDEN_MAX_TOOL_TURNS="$IN_MAX_TOOL_TURNS"
+        [ -n "$IN_PLANNER_MODEL" ] && export WARDEN_PLANNER_MODEL="$IN_PLANNER_MODEL"
+        [ -n "$IN_IMPLEMENTER_MODEL" ] && export WARDEN_IMPLEMENTER_MODEL="$IN_IMPLEMENTER_MODEL"
+        [ -n "$IN_TOOLS_MODEL" ] && export WARDEN_TOOLS_MODEL="$IN_TOOLS_MODEL"
+
+        run_id="gh-${ISSUE}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+        echo "run-id=$run_id" >> "$GITHUB_OUTPUT"
+        # --yes: the label is the human's go-ahead. The PR is always a draft; Warden never merges.
+        uv run --project "$WARDEN_SRC" --frozen --no-dev \
+          warden --plain run --from-event --yes --json --run-id "$run_id" \
+          > "$RUNNER_TEMP/warden-events.jsonl"
+        code=$?
+        echo "exit-code=$code" >> "$GITHUB_OUTPUT"
+        result="$WARDEN_RUNS_DIR/$run_id/result.json"
+        if [ -f "$result" ]; then
+          {
+            echo "verdict=$(jq -r '.verdict // ""' "$result")"
+            echo "pr-url=$(jq -r '.pr_url // ""' "$result")"
+            echo "cost-usd=$(jq -r '.cost_usd // 0' "$result")"
+          } >> "$GITHUB_OUTPUT"
+        fi
+        exit 0
+
+    - name: Comment on the issue
+      if: always() && steps.guard.outputs.skip == 'false' && steps.run.outputs.run-id != ''
+      shell: bash
+      env:
+        WARDEN_SRC: ${{ github.action_path }}
+        GH_TOKEN: ${{ inputs.github-token }}
+        REPO: ${{ github.repository }}
+        ISSUE: ${{ github.event.issue.number }}
+        RUN_ID: ${{ steps.run.outputs.run-id }}
+        EXIT_CODE: ${{ steps.run.outputs.exit-code }}
+        LOG_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      run: |
+        set -euo pipefail
+        WARDEN_RUNS_DIR="$RUNNER_TEMP/warden-runs" uv run --project "$WARDEN_SRC" --frozen \
+          --no-dev warden comment --run-id "$RUN_ID" --exit-code "${EXIT_CODE:-1}" \
+          --log-url "$LOG_URL" > "$RUNNER_TEMP/warden-comment.md"
+        gh issue comment "$ISSUE" --repo "$REPO" --body-file "$RUNNER_TEMP/warden-comment.md"
+
+    - name: Upload the run log
+      if: always() && steps.guard.outputs.skip == 'false' && steps.run.outputs.run-id != ''
+      uses: actions/upload-artifact@v4
+      with:
+        name: warden-${{ steps.run.outputs.run-id }}
+        path: ${{ runner.temp }}/warden-runs/${{ steps.run.outputs.run-id }}
+        if-no-files-found: ignore
+
+    - name: Fail the job if Warden failed
+      if: steps.guard.outputs.skip == 'false'
+      shell: bash
+      env:
+        EXIT_CODE: ${{ steps.run.outputs.exit-code }}
+      run: |
+        if [ "${EXIT_CODE:-1}" != "0" ]; then
+          echo "::error::warden run exited $EXIT_CODE; the issue comment says why"
+          exit 1
+        fi

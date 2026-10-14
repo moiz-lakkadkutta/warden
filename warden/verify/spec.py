@@ -14,7 +14,7 @@ import re
 from dataclasses import dataclass, field
 
 from warden.config import Role
-from warden.hunt.issue import IssueText
+from warden.hunt.issue import UNTRUSTED_RULE, IssueText, fence_untrusted
 from warden.plan.planner import StructuredLLM
 from warden.schemas import SpecReview
 
@@ -45,7 +45,7 @@ def spec_user_message(issue: IssueText, diff: str, tests: list[str], max_diff_ch
     if len(diff) > max_diff_chars:
         diff = diff[:max_diff_chars] + f"\n... (diff truncated at {max_diff_chars} chars)"
     return (
-        f"# Issue: {issue.title}\n\n{issue.body}\n\n"
+        f"# Issue\n{fence_untrusted(f'{issue.title}{chr(10) * 2}{issue.body}')}\n\n"
         f"# New tests\n{chr(10).join(tests) or '(none)'}\n\n"
         f"# Candidate diff\n```diff\n{diff}\n```\n"
     )
@@ -63,7 +63,7 @@ def spec_review(
     review = llm.structured(
         Role.VERDICT,
         "verify",
-        system,
+        f"{system.rstrip()}\n\n{UNTRUSTED_RULE}\n",
         spec_user_message(issue, diff, tests, max_diff_chars),
         SpecReview,
     )

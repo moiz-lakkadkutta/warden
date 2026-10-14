@@ -16,7 +16,7 @@ from typing import Protocol, TypeVar
 from pydantic import BaseModel
 
 from warden.config import Role
-from warden.hunt.issue import IssueText
+from warden.hunt.issue import UNTRUSTED_RULE, IssueText, fence_untrusted
 from warden.plan.research import Source
 from warden.runlog.events import EventLog
 from warden.schemas import Phase, Plan, ResearchQueries
@@ -59,7 +59,8 @@ QUERY_SYSTEM = (
     "web search queries about the LIBRARY behaviour the fix depends on, naming the exact API the "
     "code uses (e.g. 'SQLAlchemy ColumnOperators.in_', 'PostgreSQL SELECT ... FOR UPDATE'). Also "
     "list up to 8 identifiers from the code (functions, constants, classes) that the fix will "
-    "touch and that are worth grepping for. Never invent identifiers absent from the code."
+    "touch and that are worth grepping for. Never invent identifiers absent from the code. "
+    + UNTRUSTED_RULE
 )
 
 
@@ -160,8 +161,9 @@ def gather_context(
 def planner_user_message(issue: IssueText, context: str, sources: list[Source]) -> str:
     comments = "\n\n".join(f"--- comment\n{c}" for c in issue.comments)
     research = "\n".join(f"- [{s.title}]({s.url}): {s.snippet}" for s in sources) or "(none)"
+    reported = fence_untrusted(f"{issue.title}\n\n{issue.body}\n\n{comments}".rstrip())
     return (
-        f"# Issue #{issue.number}: {issue.title}\n\n{issue.body}\n\n{comments}\n\n"
+        f"# Issue #{issue.number}\n{reported}\n\n"
         "# Repository (git ls-files, then `@@GREP term` blocks of `path:line:text` hits)\n"
         f"{context}\n\n"
         "# Research results (you may cite ONLY these URLs)\n"
@@ -206,7 +208,7 @@ def plan_issue(
         Role.TOOLS,
         "plan",
         QUERY_SYSTEM,
-        f"{issue_text}\n\n# Code\n{repo_ctx[-LIGHTNING_CONTEXT_CHARS:]}",
+        f"{fence_untrusted(issue_text)}\n\n# Code\n{repo_ctx[-LIGHTNING_CONTEXT_CHARS:]}",
         ResearchQueries,
     )
     extra = [t for t in rq.code_terms if t not in terms]
@@ -216,7 +218,11 @@ def plan_issue(
     sources = search(rq.queries)
 
     plan = llm.structured(
-        Role.PLANNER, "plan", prompt, planner_user_message(issue, repo_ctx, sources), Plan
+        Role.PLANNER,
+        "plan",
+        f"{prompt.rstrip()}\n\n{UNTRUSTED_RULE}\n",
+        planner_user_message(issue, repo_ctx, sources),
+        Plan,
     )
 
     log.emit(

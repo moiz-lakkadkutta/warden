@@ -15,6 +15,7 @@ replay's base branch cannot live in a fork, so replays need push access to the t
 
 from __future__ import annotations
 
+import re
 import shlex
 import subprocess
 import tempfile
@@ -22,6 +23,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from warden.integrate.pr import PrOpenError
 from warden.sandbox.box import Box
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
@@ -51,6 +53,28 @@ def export_patch(box: Box, *, cwd: str, issue: int, title: str) -> str:
     if not res.ok or not res.stdout.startswith("From "):
         raise NoChangesError(f"no change to export from {box.uuid}: {res.stderr.strip()[:200]}")
     return res.stdout
+
+
+# Paths a fix branch never touches. Workflows run with the repo's secrets, so a model persuaded by
+# an issue body to edit them could exfiltrate those secrets on the next CI run.
+PROTECTED_PREFIXES = (".github/",)
+_DIFF_PATHS = re.compile(r"^diff --git a/(\S+) b/(\S+)$", re.MULTILINE)
+
+
+def touched_paths(patch: str) -> list[str]:
+    """Every path a format-patch touches (both sides of a rename), sorted, unique."""
+    return sorted({p for pair in _DIFF_PATHS.findall(patch) for p in pair})
+
+
+def refuse_protected(patch: str) -> None:
+    """Raise PrOpenError (nothing is pushed) when the patch touches a protected path."""
+    hit = [p for p in touched_paths(patch) if p.startswith(PROTECTED_PREFIXES)]
+    if hit:
+        raise PrOpenError(
+            f"refusing to push: the candidate changes {', '.join(hit)} "
+            "(Warden never edits CI workflows or repo automation)",
+            fix="make that change by hand; the patch is in the run's artifacts/candidate.patch",
+        )
 
 
 def _git(runner: Runner, cwd: Path, *args: str) -> str:

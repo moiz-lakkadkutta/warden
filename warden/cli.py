@@ -12,7 +12,7 @@ import shutil
 import sys
 from collections.abc import Iterator
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, cast
+from typing import TYPE_CHECKING, Annotated, NoReturn, cast
 
 import typer
 
@@ -21,6 +21,7 @@ from warden.ui import fail
 
 if TYPE_CHECKING:
     from warden.config import Settings
+    from warden.hunt.issue import EventIssue
     from warden.runlog.events import EventLog
     from warden.schemas import Phase
 
@@ -79,13 +80,30 @@ def _guarded(log: EventLog) -> Iterator[None]:
     except BaseBuildError as e:
         fail(str(e), fix=e.fix, run_id=log.run_id, code=3, exc=e)
     except ProviderBudgetError as e:  # client.py already emitted the error event
+        _record_failure(log, str(e), e.fix, 4)
         fail(str(e), fix=f"{e.fix} {log.run_id}", run_id=log.run_id, code=4, exc=e)
     except PrOpenError as e:
+        _record_failure(log, str(e), e.fix, 1)
         fail(str(e), fix=e.fix, run_id=log.run_id, exc=e)
     except NotReadyError as e:
+        _record_failure(log, str(e), e.fix, 3)
         fail(str(e), fix=e.fix, run_id=log.run_id, code=3, exc=e)
     finally:
         log.close()
+
+
+def _record_failure(log: EventLog, message: str, fix: str | None, code: int) -> None:
+    """An `error` event in the phase that was running, so `warden comment` can say why."""
+    from warden.pipeline import PHASES, completed_phases
+
+    phase = PHASES[min(len(completed_phases(log.dir)), len(PHASES) - 1)]
+    log.emit(phase, "error", {"text": message, "fix": fix, "exit_code": code})
+
+
+def _fail_run(log: EventLog, message: str, *, fix: str, code: int) -> NoReturn:
+    """`fail` for a run that has a log: the reason is recorded before the error block."""
+    _record_failure(log, message, fix, code)
+    fail(message, fix=fix, run_id=log.run_id, code=code)
 
 
 def _plain_override(plain: bool) -> None:
@@ -156,6 +174,15 @@ def doctor(
             f"set WARDEN_GATE_PROFILE to one of: {', '.join(PROFILES)}",
         )
     )
+    suite = s.test_cmd or (PROFILES[s.gate_profile].suite if s.gate_profile in PROFILES else "")
+    checks.append(
+        (
+            f"WARDEN_TEST_CMD ({s.test_cmd or 'unset'})",
+            bool(suite),
+            "set WARDEN_TEST_CMD to the repo's test command (e.g. `pytest -q`); "
+            f"profile {s.gate_profile} runs no suite without it",
+        )
+    )
     checks.append(
         (
             f"WARDEN_SPEC_CHECK ({'on' if s.spec_check else 'off'})",
@@ -169,13 +196,6 @@ def doctor(
             f"WARDEN_READ_CACHE ({'on' if s.read_cache else 'off'})",
             True,
             "implementer read-loop guards",
-        )
-    )
-    checks.append(
-        (
-            f"WARDEN_TEST_CMD ({s.test_cmd or f'unset: {s.gate_profile} suite'})",
-            True,
-            "set WARDEN_TEST_CMD to the repo's own test command (gate suite + regression check)",
         )
     )
     checks.append(
@@ -374,6 +394,14 @@ def run(
         str | None,
         typer.Option("--stop-after", help="Stop after this phase: hunt, plan, fix or verify."),
     ] = None,
+    from_event: Annotated[
+        bool,
+        typer.Option(
+            "--from-event",
+            help="Take the issue and repo from the GitHub Actions `issues` event at "
+            "$GITHUB_EVENT_PATH (comments are ignored). The PR is a draft, as always.",
+        ),
+    ] = False,
 ) -> None:
     """Hunt → plan → fix → verify → PR for one issue. Prints run_id first (see `warden resume`)."""
     from warden.config import load_settings
@@ -417,21 +445,21 @@ def run(
                 _err(result["evidence"])
             raise typer.Exit(0)
 
+        event_issue = None
+        if from_event:
+            event_issue = _event_issue(log, issue)
+            issue = event_issue.issue.number
+            s.target_repo = event_issue.repo
         if issue is None:
-            fail(
+            _fail_run(
+                log,
                 "nothing to run",
                 fix="pass --issue N, or --demo to try Warden without credentials",
-                run_id=log.run_id,
                 code=2,
             )
         missing = s.missing_for("NEBIUS_API_KEY", "CONTREE_BASE_URL", "NEBIUS_PROJECT_ID")
         if missing:
-            fail(
-                f"missing {', '.join(missing)}",
-                fix="run `warden doctor`",
-                run_id=log.run_id,
-                code=2,
-            )
+            _fail_run(log, f"missing {', '.join(missing)}", fix="run `warden doctor`", code=2)
         from warden.pipeline import live_steps, run_pipeline
 
         if repo is not None:
@@ -447,6 +475,7 @@ def run(
             stop_after=stop,
             requested_issue=issue,
             at_rev=at,
+            issue=event_issue.issue if event_issue is not None else None,
         )
         if not json_out:
             _err(result["evidence"])
@@ -494,6 +523,53 @@ def _external_settings(
     _err(f"base: {base.image} ({'cached' if base.cached else 'built'}) · tests: {base.test_cmd}")
     (log.dir / EXTERNAL_BASE).write_text(base.to_json(), encoding="utf-8")
     return s.model_copy(update=base.overrides())
+
+
+def _event_issue(log: EventLog, issue: int | None) -> EventIssue:
+    """The issue named by $GITHUB_EVENT_PATH; a usage error (exit 2) when there is none."""
+    import os
+
+    from warden.hunt.issue import EventError, issue_from_event
+
+    path = os.environ.get("GITHUB_EVENT_PATH", "")
+    if not path:
+        _fail_run(
+            log,
+            "--from-event needs GITHUB_EVENT_PATH",
+            fix="run inside a GitHub Actions `issues` workflow, or pass --issue N instead",
+            code=2,
+        )
+    try:
+        ev = issue_from_event(Path(path))
+    except EventError as e:
+        _fail_run(log, str(e), fix="trigger on `issues: [labeled]` for an open issue", code=2)
+    if issue is not None and issue != ev.issue.number:
+        _fail_run(
+            log,
+            f"--issue {issue} disagrees with the event's issue #{ev.issue.number}",
+            fix="drop --issue when using --from-event",
+            code=2,
+        )
+    return ev
+
+
+@app.command()
+def comment(
+    run_id: Annotated[str, typer.Option("--run-id", "--run", help="The run to summarise.")],
+    exit_code: Annotated[
+        int, typer.Option("--exit-code", help="`warden run`'s exit code, for a crashed run.")
+    ] = 0,
+    log_url: Annotated[
+        str | None, typer.Option("--log-url", help="Link to the CI log for this run.")
+    ] = None,
+) -> None:
+    """Print a Markdown issue comment for a run: the draft PR link, or why not, and the cost."""
+    from warden.config import load_settings
+    from warden.integrate.comment import issue_comment
+
+    s = load_settings()
+    text = issue_comment(s.runs_dir / run_id, run_id=run_id, exit_code=exit_code, log_url=log_url)
+    sys.stdout.write(text)
 
 
 @app.command("eval")
