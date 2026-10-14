@@ -7,7 +7,9 @@ only doubt is an inconclusive theater run. Checks the image cannot run are liste
 `not_verified` and never block. The regression check (existing tests green on base, red on the
 candidate) and the spec review (a behaviour the issue states, quoted, that the diff does not
 implement) add FAIL reasons; their inconclusive or unclear results are concerns. The spec review
-is the one LLM input and it never upgrades a decision.
+is the one LLM input and it never upgrades a decision. A suite that times out is still FAIL (no
+run showed the new tests passing on the candidate) but marked `inconclusive` when it is the only
+fail reason: the candidate was not verified, which is different from being rejected.
 """
 
 from __future__ import annotations
@@ -28,6 +30,7 @@ def decide(
     spec: SpecResult | None = None,
 ) -> Verdict:
     fail: list[str] = []
+    unverified: list[str] = []  # fail reasons that are "could not check", not "checked and red"
     concerns: list[str] = []
     passed: list[str] = []
 
@@ -51,6 +54,8 @@ def decide(
     else:
         if gate.suite_ok and gate.suite.get("failed", 0) == 0 and gate.suite.get("passed", 0) > 0:
             passed.append(f"full suite green ({gate.suite.get('passed')} passed)")
+        elif gate.suite_timed_out:
+            unverified.append("full suite timed out (no summary): inconclusive, not proof")
         else:
             fail.append(f"full suite not green ({gate.suite or 'no summary'})")
         for check, ok, name in (
@@ -83,7 +88,8 @@ def decide(
         if spec.unclear:
             concerns.append(f"spec unclear: {'; '.join(spec.unclear[:5])}")
 
-    decision = "FAIL" if fail else ("PASS_WITH_CONCERNS" if concerns else "PASS")
+    fail_all = fail + unverified
+    decision = "FAIL" if fail_all else ("PASS_WITH_CONCERNS" if concerns else "PASS")
     return Verdict(
         decision=decision,  # type: ignore[arg-type]
         theater_failed_on_base=failed_on_base,
@@ -95,7 +101,8 @@ def decide(
         openapi_drift=bool(gate is None or gate.openapi_drift),
         not_verified=list(gate.not_verified) if gate else ["gate"],
         concerns=concerns,
-        reasons=fail + passed if fail else passed,
+        reasons=fail_all + passed if fail_all else passed,
         regressions=list(regression.broken) if regression else [],
         spec_unmet=list(spec.unmet) if spec else [],
+        inconclusive=bool(unverified) and not fail,
     )

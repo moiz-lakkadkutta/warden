@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from warden.runlog.events import EventLog
-from warden.sandbox.box import Box, RunResult
+from warden.sandbox.box import TIMEOUT_EXIT, Box, RunResult
 
 _SUMMARY = re.compile(r"(\d+) (passed|failed|errors?|skipped|xfailed|xpassed)")
 # pytest's final line: "===== 1 failed, 4 passed in 0.10s =====" or (-q) "5 passed in 0.10s"
@@ -133,6 +133,15 @@ class GateResult:
     @property
     def suite_ok(self) -> bool:
         return any(s.name == "suite" and s.ok for s in self.steps)
+
+    @property
+    def suite_timed_out(self) -> bool:
+        """No summary and the run hit a deadline: Box's 124, or Contree's -1 when it kills the
+        command at its own deadline. A hang shows nothing either way (e.g. a test needs a broker)."""
+        return not self.suite and any(
+            s.name == "suite" and (s.exit_code == TIMEOUT_EXIT or s.exit_code < 0)
+            for s in self.steps
+        )
 
     @property
     def ok(self) -> bool:

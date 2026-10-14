@@ -122,6 +122,8 @@ class Verdict(BaseModel):
     regressions: list[str] = Field(default_factory=list)
     # behaviours the issue states, quoted, that the diff does not implement (verify/spec.py)
     spec_unmet: list[str] = Field(default_factory=list)
+    # FAIL only because a check could not finish (suite timed out): unverified, not rejected
+    inconclusive: bool = False
 
 
 class SpecBehaviour(BaseModel):

@@ -142,3 +142,32 @@ def test_without_regression_or_spec_the_old_decision_stands() -> None:
     v = decide(_cand(), _theater(), _green())
     assert v.decision == "PASS"
     assert "fe codegen" in v.not_verified
+
+
+def _timed_out(code: int = 124) -> GateResult:
+    return _gate(code, suite={})
+
+
+def test_a_suite_with_no_summary_after_a_timeout_or_kill_is_timed_out() -> None:
+    assert _timed_out(124).suite_timed_out
+    assert _timed_out(-1).suite_timed_out  # Contree kills at its own deadline with exit -1
+    assert not _gate(1, suite={}).suite_timed_out  # a crash, not a hang
+    assert not _gate(124, suite={"passed": 3, "failed": 1}).suite_timed_out
+
+
+def test_a_timed_out_suite_is_an_inconclusive_fail_not_a_red_suite() -> None:
+    v = decide(_cand(), _theater(inconclusive=True, failed=False), _timed_out(-1))
+    # never a pass: nothing showed the new tests passing on the candidate
+    assert v.decision == "FAIL" and v.inconclusive
+    assert any("timed out" in r and "inconclusive" in r for r in v.reasons)
+    assert not any("not green" in r for r in v.reasons)
+
+
+def test_a_timeout_beside_a_real_failure_is_a_rejection() -> None:
+    v = decide(_cand(), _theater(failed=False), _timed_out())  # theater: tests pass on base
+    assert v.decision == "FAIL" and not v.inconclusive
+
+
+def test_a_red_suite_is_not_inconclusive() -> None:
+    v = decide(_cand(), _theater(), _gate(1, suite={"passed": 1, "failed": 2}))
+    assert v.decision == "FAIL" and not v.inconclusive
