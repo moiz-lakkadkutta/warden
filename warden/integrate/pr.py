@@ -200,6 +200,13 @@ def evidence_table(
         theater = "inconclusive — not proof"
     else:
         theater = "PASSED — tests are theater"
+    if verdict.theater_retry:  # WARDEN_THEATER_RETRIES: the implementer rewrote its tests
+        n = verdict.theater_retry
+        theater += (
+            f" (repro found on retry {n})"
+            if verdict.theater_failed_on_base
+            else f" (after {n} theater {'retry' if n == 1 else 'retries'})"
+        )
     theater += "".join(  # per new test: why it does or does not count as a repro
         f"<br>`{n.rsplit('/', 1)[-1]}`: {why}" for n, why in list(verdict.theater_tests.items())[:6]
     )

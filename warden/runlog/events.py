@@ -71,6 +71,10 @@ class EventLog:
     def note(self, phase: Phase, text: str) -> None:
         self.emit(phase, "note", {"text": text})
 
+    def artifact_path(self, name: str) -> Path:
+        """Where `artifact(name, …)` writes (artifacts/, or artifacts/candidate-<k>/ on a view)."""
+        return self._artifacts / name
+
     def artifact(self, name: str, content: str | bytes) -> Path:
         path = self._artifacts / name
         if isinstance(content, str):

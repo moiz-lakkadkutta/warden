@@ -156,13 +156,20 @@ class Verdict(BaseModel):
     candidates: list[CandidateSummary] = Field(default_factory=list)
     chosen: int | None = None
     chosen_why: str = ""
+    # theater retries (WARDEN_THEATER_RETRIES) the implementer took before this verdict; 0 = none
+    theater_retry: int = 0
 
     @model_serializer(mode="wrap")
     def _omit_unset_extras(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
         """The fields added for best-of-N are left out while unset, so a single-candidate
         verdict.json is byte-identical to one written before they existed."""
         data: dict[str, Any] = handler(self)
-        for key, empty in (("diff_lines", None), ("candidates", []), ("chosen", None)):
+        for key, empty in (
+            ("diff_lines", None),
+            ("candidates", []),
+            ("chosen", None),
+            ("theater_retry", 0),
+        ):
             if data.get(key) == empty:
                 data.pop(key, None)
         if not data.get("chosen_why"):
@@ -287,4 +294,14 @@ class RunShellArgs(ToolArgs):
     )
     timeout: int = Field(
         600, ge=1, le=600, description="Seconds before the command is killed (1-600, default 600)."
+    )
+
+
+class RunTestsUnfixedArgs(ToolArgs):
+    """`run_tests_unfixed`, offered on a theater retry: the model's current test files on a fork of
+    the unfixed base (source as it was before the fix), never on its own checkpoint."""
+
+    tests: list[str] = Field(
+        min_length=1,
+        description="Test files or pytest node ids (path::test_name), relative to the repo root.",
     )

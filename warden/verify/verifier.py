@@ -23,6 +23,8 @@ from warden.verify.regression import RegressionResult
 from warden.verify.spec import SpecResult
 from warden.verify.theater import TheaterResult
 
+THEATER_PASSED = "a new test fails on the unfixed base (theater check)"
+
 
 def decide(
     cand: Candidate,
@@ -47,7 +49,7 @@ def decide(
     invalid = bool(theater and theater.invalid)
     if theater is not None:
         if failed_on_base:
-            passed.append("a new test fails on the unfixed base (theater check)")
+            passed.append(THEATER_PASSED)
         elif invalid:
             fail.append(f"theater: invalid repro — {theater.why}")
         elif inconclusive:
@@ -120,3 +122,38 @@ def decide(
         spec_unmet=list(spec.unmet) if spec else [],
         inconclusive=bool(unverified) and not fail,
     )
+
+
+def theater_retryable(cand: Candidate, v: Verdict) -> bool:
+    """A FAIL whose only cause is the theater check: no new test reproduces the issue on the
+    unfixed base (all pass there, or red only for the wrong reason / still red with the fix),
+    while the implementer finished and everything else is green. Only then can the fix be kept
+    and the tests rewritten. A red suite is allowed when the new tests that stay red with the
+    fix account for every failure (they are the invalid repro, not a broken fix)."""
+    if v.decision != "FAIL" or cand.done is False or not cand.tests_added:
+        return False
+    if v.theater_failed_on_base or v.theater_inconclusive or v.inconclusive or not v.theater_tests:
+        return False
+    red_new = sum(
+        1 for why in v.theater_tests.values() if why.startswith("invalid") and "with the fix" in why
+    )
+    red = v.suite.get("failed", 0) + v.suite.get("errors", 0)
+    suite_ok = v.suite.get("passed", 0) > 0 and red <= red_new
+    gate_ok = v.mypy_ok and v.ruff_ok and v.alembic_single_head and not v.openapi_drift
+    return suite_ok and gate_ok and not v.regressions and not v.spec_unmet
+
+
+def with_theater_retry(v: Verdict, retries: int) -> Verdict:
+    """The last attempt's verdict, saying how many theater retries came before it."""
+    if retries <= 0:
+        return v
+    word = "retry" if retries == 1 else "retries"
+
+    def note(reason: str) -> str:
+        if reason == THEATER_PASSED:
+            return f"{reason} — repro found on retry {retries}"
+        if reason.startswith("theater:"):
+            return f"{reason} (still, after {retries} theater {word})"
+        return reason
+
+    return v.model_copy(update={"theater_retry": retries, "reasons": [note(r) for r in v.reasons]})

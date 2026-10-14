@@ -253,6 +253,15 @@ def test_doctor_checks_warden_candidates() -> None:
     assert "→" not in line
 
 
+def test_doctor_checks_warden_theater_retries() -> None:
+    bad = _invoke("doctor", env={"WARDEN_THEATER_RETRIES": "5"})
+    assert "WARDEN_THEATER_RETRIES (5)" in bad.stderr
+    assert "set WARDEN_THEATER_RETRIES to 0-3" in bad.stderr
+    off = _invoke("doctor", env={"WARDEN_THEATER_RETRIES": "0"})
+    line = next(ln for ln in off.stderr.splitlines() if "WARDEN_THEATER_RETRIES (off)" in ln)
+    assert "→" not in line
+
+
 def test_eval_candidates_option_is_bounded() -> None:
     assert _invoke("eval", "--candidates", "0", "--yes").exit_code == 2
     assert "--candidates" in _invoke("eval", "--help").stdout

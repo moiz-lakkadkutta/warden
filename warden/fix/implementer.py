@@ -33,12 +33,15 @@ from warden.fix.tools import (
     replace_once,
     strict_schema,
     tolerate_args,
+    truncate,
 )
 from warden.llm.client import ChatResult
 from warden.llm.cost import usd_for
 from warden.runlog.events import EventLog
 from warden.sandbox.box import Box
-from warden.schemas import Candidate, FixReport, Phase, Plan
+from warden.schemas import Candidate, FixReport, Phase, Plan, RunTestsUnfixedArgs
+from warden.verify.tail import keep_tail
+from warden.verify.theater import DEFAULT_CMD as THEATER_CMD
 
 PROMPT_PATH: Path = Path(__file__).resolve().parents[2] / "prompts" / "implementer.md"
 PHASE: Phase = "fix"
@@ -55,6 +58,25 @@ FINISH_TOOL: dict[str, Any] = {
     },
 }
 ALL_TOOLS: list[dict[str, Any]] = [*TOOL_SCHEMAS, FINISH_TOOL]
+
+# Theater retry only (run_implementer(unfixed=...)): the verifier's theater probe, on demand. The
+# model's current test files are copied onto a fork of the unfixed base and run there; its own
+# checkpoint, with the fix, is never touched, so checking "does it fail without the fix" cannot
+# lose the fix (a stash the model forgets to pop would).
+UNFIXED_TOOL_NAME = "run_tests_unfixed"
+UNFIXED_TOOL: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": UNFIXED_TOOL_NAME,
+        "description": (
+            "Run tests against the UNFIXED source: your current versions of the given test "
+            "files are copied onto the code as it was before your fix, then pytest -rA runs "
+            "them there. Your working copy is not changed. A good repro FAILS here (on an "
+            "assertion about the issue's behaviour) and passes in run_shell."
+        ),
+        "parameters": strict_schema(RunTestsUnfixedArgs.model_json_schema()),
+    },
+}
 
 ROUTER_SYSTEM = (
     "You are a tool router for a coding agent. The user message is the agent's prose reply. "
@@ -140,9 +162,11 @@ def build_messages(
     lint: str = "",
     variant: str = "",
     read_cache: bool = True,
+    tool_schemas: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     tools = "\n".join(
-        f"- {t['function']['name']} — {t['function']['description']}" for t in ALL_TOOLS
+        f"- {t['function']['name']} — {t['function']['description']}"
+        for t in (ALL_TOOLS if tool_schemas is None else tool_schemas)
     )
     system = (
         f"{prompt_text.rstrip()}\n\n## Available tools\n{tools}\n\n"
@@ -404,6 +428,45 @@ def _after_edit(name: str, args: dict[str, Any], before: str | None) -> str | No
     return None if err else text
 
 
+def run_unfixed(
+    box: Box, unfixed: Box, args: Any, *, dispatch: ToolDispatcher, plan: Plan, root: str
+) -> tuple[str, int | None, list[str]]:
+    """`run_tests_unfixed`: (text for the model, exit code or None on bad args, targets)."""
+    # Checked by hand, not by RunTestsUnfixedArgs.model_validate: this module's one except
+    # clause stays parse_finish's. A bare string is tolerated as a one-item list.
+    tests = args.get("tests") if isinstance(args, dict) else None
+    tests = [tests] if isinstance(tests, str) else tests
+    if not isinstance(tests, list) or not all(isinstance(t, str) for t in tests):
+        return (
+            f"invalid arguments for {UNFIXED_TOOL_NAME}: tests must be a list of test files "
+            "or node ids",
+            None,
+            [],
+        )
+    targets = [_norm(t, root) for t in tests if t.strip()]
+    files = sorted({t.split("::", 1)[0] for t in targets})
+    not_tests = [f for f in files if not is_test_path(f, plan, root)]
+    if not targets or not_tests:
+        return (
+            f"{UNFIXED_TOOL_NAME} copies test files only; not a test file: "
+            f"{', '.join(not_tests) or '(none given)'}",
+            None,
+            targets,
+        )
+    content: dict[str, bytes] = {}
+    for f in files:
+        got = _cat(box, f, root)
+        if not got.ok:
+            return f"{f}: no such file in your working copy", None, targets
+        content[f] = got.stdout.encode()
+    probe = unfixed.copy_in(content, cwd=root)
+    cmd = keep_tail(f"{THEATER_CMD} {' '.join(shlex.quote(t) for t in targets)}")
+    res = dispatch.run(probe, cmd, timeout=600)
+    text, _ = truncate(res.stdout + res.stderr, 6000)
+    head = f"exit {res.exit_code} on the UNFIXED source (your test files copied in)\n"
+    return head + text, res.exit_code, targets
+
+
 def _step_text(name: str, args: Any, exit_code: int | None) -> str:
     subject = str(args.get("path") or args.get("command") or "") if isinstance(args, dict) else ""
     head = f"{name} {subject}" if subject else name
@@ -427,12 +490,17 @@ def run_implementer(
     variant: str = "",
     idle_nudge_after: int = 8,
     read_cache: bool = True,
+    unfixed: Box | None = None,
+    prior_tests: list[str] | None = None,
 ) -> Candidate:
     """Drive the implementer over `base` until `finish` or the tool-turn budget; return the
     Candidate whose `image_uuid` is the last checkpoint. A "turn" is one model action: a
     dispatched call, a refused write, a cached re-read, an invalid `finish` or an unroutable
     prose reply. `idle_nudge_after` (0 = off) and `read_cache` are the read-loop guards.
-    `variant` (best-of-N) is appended to the user message so candidates do not converge."""
+    `variant` (best-of-N) is appended to the user message so candidates do not converge; a theater
+    retry puts the verifier's feedback there. `unfixed` (theater retry: `base` is then the
+    candidate checkpoint) offers `run_tests_unfixed` against that unfixed base; `prior_tests` are
+    the earlier attempt's new tests, kept in `tests_added`."""
     dispatch = dispatcher if dispatcher is not None else ToolDispatcher(log)
     hooks: Progress = progress if progress is not None else _NoProgress()
 
@@ -441,6 +509,7 @@ def run_implementer(
 
     prompt_text = PROMPT_PATH.read_text(encoding="utf-8")
     root = dispatch.cwd
+    tools = ALL_TOOLS if unfixed is None else [*ALL_TOOLS, UNFIXED_TOOL]
     messages = build_messages(
         prompt_text,
         plan,
@@ -449,10 +518,11 @@ def run_implementer(
         lint=lint,
         variant=variant,
         read_cache=read_cache,
+        tool_schemas=tools,
     )
     box = base
     turns = 0
-    tests_added: list[str] = []
+    tests_added: list[str] = list(prior_tests or [])
     first_write: str | None = None
     cost = 0.0
     report: FixReport | None = None
@@ -474,9 +544,10 @@ def run_implementer(
         max_tool_turns=max_tool_turns,
         idle_nudge_after=idle_nudge_after,
         read_cache=read_cache,
+        **({} if unfixed is None else {"unfixed": unfixed.uuid, "prior_tests": tests_added[:]}),
     )
     while report is None and turns < max_tool_turns:
-        res = llm.chat(Role.IMPLEMENTER, PHASE, compact_history(messages), tools=ALL_TOOLS)
+        res = llm.chat(Role.IMPLEMENTER, PHASE, compact_history(messages), tools=tools)
         cost += _charge(res, hooks)
         calls = res.tool_calls
         if not calls and res.content:
@@ -487,7 +558,7 @@ def run_implementer(
                     {"role": "system", "content": ROUTER_SYSTEM},
                     {"role": "user", "content": res.content},
                 ],
-                tools=ALL_TOOLS,
+                tools=tools,
             )
             cost += _charge(routed, hooks)
             calls = routed.tool_calls
@@ -513,6 +584,16 @@ def run_implementer(
                 continue
             if turns >= max_tool_turns:
                 messages.append(_tool_message(cid, BUDGET_MSG))
+                continue
+            if name == UNFIXED_TOOL_NAME and unfixed is not None:
+                text, code, targets = run_unfixed(
+                    box, unfixed, args, dispatch=dispatch, plan=plan, root=root
+                )
+                turns += 1
+                idle = 0
+                messages.append(_tool_message(cid, text))
+                note("unfixed_run", tests=targets, exit_code=code)
+                hooks.step(f"{UNFIXED_TOOL_NAME} {' '.join(targets)} → exit {code}")
                 continue
             edit_path = _edit_path(name, args)
             is_test_write = edit_path is not None and is_test_path(edit_path, plan, root)
@@ -598,7 +679,8 @@ def run_implementer(
                 elif is_test_write and after is not None:  # existing file: new tests are nodes
                     for name_ in test_nodes(after):
                         node = f"{key}::{name_}"
-                        if name_ not in base_tests[key] and node not in tests_added:
+                        new = name_ not in base_tests[key] and key not in tests_added
+                        if new and node not in tests_added:
                             tests_added.append(node)
         # after the whole batch: a user message may not split tool_calls from their results
         if (

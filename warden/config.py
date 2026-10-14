@@ -15,6 +15,7 @@ from typing import Any
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+MAX_THEATER_RETRIES = 3  # doctor checks WARDEN_THEATER_RETRIES against it
 MAX_CANDIDATES = 8  # best-of-N upper bound (doctor checks WARDEN_CANDIDATES against it)
 
 
@@ -80,6 +81,10 @@ class Settings(BaseSettings):
     runs_dir: Path = Field(default=Path("runs"), alias="WARDEN_RUNS_DIR")
     # Best-of-N: implementer runs per issue, each on its own fork of the base, verifier ranks
     candidates: int = Field(default=1, alias="WARDEN_CANDIDATES")
+    # Theater retries: when the only FAIL is "no new test reproduces the issue on the unfixed
+    # base", the implementer continues from the candidate with that feedback and verify reruns
+    # (run 20261014-131452-cd9b: right fix, all 4 new tests already passed on base). 0 = off.
+    theater_retries: int = Field(default=1, ge=0, alias="WARDEN_THEATER_RETRIES")
     # Verifier's spec review: one VERDICT call comparing the diff with the issue's stated behaviours
     spec_check: bool = Field(default=True, alias="WARDEN_SPEC_CHECK")
     # The repo's own test command (no file args). Set: it is the gate's suite and the regression

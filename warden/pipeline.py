@@ -122,6 +122,9 @@ class Steps:
     fix: Callable[[StepContext, Plan], Candidate]
     verify: Callable[[StepContext, Plan, Candidate], Verdict]
     pr: Callable[[StepContext, IssueRef, Plan, Candidate, Verdict], PrOutcome]
+    # theater retry (WARDEN_THEATER_RETRIES): (ctx, plan, candidate, its verdict, retry n) → the
+    # candidate continued from that checkpoint with the verifier's feedback; None = never retry
+    retry_fix: Callable[[StepContext, Plan, Candidate, Verdict, int], Candidate] | None = None
 
 
 # ----------------------------------------------------------------------------- state
@@ -303,7 +306,9 @@ def _call(steps: Steps, phase: Phase, ctx: StepContext, outputs: dict[Phase, Any
         chosen = ctx.artifacts / BEST_OF_N
         if chosen.exists():  # best-of-N verified every candidate already; this is the winner's
             return Verdict.model_validate_json(chosen.read_text(encoding="utf-8"))
-        return steps.verify(ctx, outputs["plan"], outputs["fix"])
+        cand, verdict = verify_with_retries(steps, ctx, outputs["plan"], outputs["fix"])
+        outputs["fix"] = cand  # a theater retry replaced the candidate (and candidate.json)
+        return verdict
     return steps.pr(ctx, outputs["hunt"], outputs["plan"], outputs["fix"], outputs["verify"])
 
 
@@ -324,6 +329,95 @@ def _result(
         "pr_url": outputs["pr"].url if "pr" in outputs else None,
         "resumed_from": start_after,
     }
+
+
+# ---------------------------------------------------------------------- theater retry
+
+# Verify artifacts an attempt leaves behind; a retry keeps them as <stem>.attempt<n><suffix>.
+ATTEMPT_ARTIFACTS = ("theater.txt", "gate.txt", "regression.txt", "spec.json")
+
+
+def attempt_name(name: str, n: int) -> str:
+    """`verdict.json`, 1 → `verdict.attempt1.json`."""
+    stem, dot, suffix = name.rpartition(".")
+    return f"{stem}.attempt{n}.{suffix}" if dot else f"{name}.attempt{n}"
+
+
+def retries_used(log: EventLog) -> int:
+    """Theater retries already done for this candidate: each leaves candidate.attempt<n>.json
+    once its implementer pass returned, so a resumed verify never retries twice."""
+    n = 0
+    while log.artifact_path(attempt_name("candidate.json", n + 1)).exists():
+        n += 1
+    return n
+
+
+def base_output(log: EventLog) -> str:
+    """The base pytest output of the last theater check (theater.txt after `# base`)."""
+    path = log.artifact_path("theater.txt")
+    if not path.exists():
+        return ""
+    _, _, out = path.read_text(encoding="utf-8").partition("\n# base")
+    return out
+
+
+def verify_with_retries(
+    steps: Steps, ctx: StepContext, plan: Plan, cand: Candidate
+) -> tuple[Candidate, Verdict]:
+    """Verify `cand`; while the only FAIL is the theater check (verifier.theater_retryable) and
+    WARDEN_THEATER_RETRIES allows, hand it back to the implementer (`steps.retry_fix`, which
+    continues from the candidate checkpoint) and verify again. Returns the last candidate and
+    its verdict, which says how many retries came before it. Each earlier attempt's verdict,
+    candidate and verify artifacts stay as *.attempt<n>.*; candidate.json is the latest. The cost
+    cap covers every attempt (the retry's LLM meter starts from the run's spend) and is never
+    caught here."""
+    from warden.verify.verifier import theater_retryable, with_theater_retry
+
+    log = ctx.log
+    retries = ctx.settings.theater_retries
+    used = retries_used(log)
+    verdict = steps.verify(ctx, plan, cand)
+    while steps.retry_fix is not None and used < retries and theater_retryable(cand, verdict):
+        n = used + 1
+        log.artifact(attempt_name("verdict.json", n), verdict.model_dump_json(indent=2))
+        for name in ATTEMPT_ARTIFACTS:
+            src = log.artifact_path(name)
+            if src.exists():
+                shutil.copyfile(src, log.artifact_path(attempt_name(name, n)))
+        log.emit(
+            "verify",
+            "note",
+            {
+                "text": f"theater retry {n}/{retries}: no new test reproduces the issue on the "
+                "unfixed base; back to the implementer from the candidate",
+                "retry": "theater",
+                "attempt": n + 1,
+                "theater_tests": dict(verdict.theater_tests),
+            },
+        )
+        ctx.progress.step(f"theater retry {n}/{retries}: tests pass on the unfixed base")
+        new = steps.retry_fix(ctx, plan, cand, verdict, n)  # reads theater.txt: not yet rerun
+        log.artifact(attempt_name("candidate.json", n), cand.model_dump_json(indent=2))
+        _write_atomic(log.artifact_path(MARKER["fix"]), new.model_dump_json(indent=2))
+        cand, used = new, n
+        verdict = steps.verify(ctx, plan, cand)
+    if used:
+        verdict = with_theater_retry(verdict, used)
+        found = verdict.theater_failed_on_base
+        log.emit(
+            "verify",
+            "note",
+            {
+                "text": f"theater retry {used}: "
+                + ("repro found" if found else "still no repro")
+                + f" → {verdict.decision}",
+                "retry": "theater",
+                "attempt": used + 1,
+                "decision": verdict.decision,
+                "repro": found,
+            },
+        )
+    return cand, verdict
 
 
 # ------------------------------------------------------------------------- best-of-N
@@ -482,7 +576,7 @@ def best_of_n(steps: Steps, ctx: StepContext, plan: Plan, n: int) -> Candidate:
         ctx.progress.step(f"candidate {k}/{n}")
         before = ctx.spent_usd()
         cand = steps.fix(sub, plan)
-        verdict = steps.verify(sub, plan, cand)
+        cand, verdict = verify_with_retries(steps, sub, plan, cand)
         usd = ctx.spent_usd() - before
         costliest = max(costliest, usd)
         pairs[k] = (cand, verdict)
@@ -527,6 +621,7 @@ def live_steps() -> Steps:
         fix=_live_fix,
         verify=_live_verify,
         pr=_live_pr,
+        retry_fix=_live_retry_fix,
     )
 
 
@@ -636,6 +731,51 @@ def _live_fix(ctx: StepContext, plan: Plan) -> Candidate:
         f"{len(cand.tests_added)} new tests"
     )
     return cand
+
+
+def _live_retry_fix(
+    ctx: StepContext, plan: Plan, cand: Candidate, verdict: Verdict, attempt: int
+) -> Candidate:
+    """Theater retry `attempt`: the implementer continues from `cand`'s checkpoint with the
+    verifier's feedback and `run_tests_unfixed` on the base (fix/retry.py)."""
+    from warden.fix.retry import retry_budget, retry_implementer
+    from warden.fix.tools import ToolDispatcher
+    from warden.llm.client import LLM
+    from warden.llm.cost import CostMeter
+    from warden.verify.gate import PROFILES
+
+    s = ctx.settings
+    base = _base_box(ctx, "fix")
+    llm = LLM(
+        s,
+        CostMeter(cap_usd=s.max_usd_per_issue - ctx.spent_usd()),
+        ctx.log,
+        temperature=candidate_temperature(ctx.candidate),
+    )
+    profile = PROFILES[s.gate_profile]
+    ctx.progress.step(f"theater retry {attempt}: {retry_budget(s.max_tool_turns)} turns")
+    new = retry_implementer(
+        llm,
+        base,
+        cand,
+        plan,
+        verdict,
+        ctx.log,
+        dispatcher=ToolDispatcher(ctx.log, cwd=s.workdir, shell_wrap=s.shell_wrap),
+        attempt=attempt,
+        retries=s.theater_retries,
+        max_tool_turns=s.max_tool_turns,
+        base_output=base_output(ctx.log),
+        progress=ctx.progress,
+        idle_nudge_after=s.idle_nudge_after,
+        read_cache=s.read_cache,
+        lint=profile.lint,
+        autofix=profile.autofix,
+    )
+    ctx.progress.step(
+        f"retry {attempt}: {'done' if new.done else 'blocked'}, {len(new.tests_added)} new tests"
+    )
+    return new
 
 
 def planner_prompt(profile: str) -> str:

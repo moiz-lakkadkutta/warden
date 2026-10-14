@@ -54,6 +54,16 @@ Inconclusive results (collection errors, timeouts, unquotable claims) are concer
 Checks a repo cannot run are listed as **not verified**, never shown as green. Money / tax /
 schema / security changes are labelled `PENDING-HUMAN`. Warden never merges.
 
+**Theater retry** (`WARDEN_THEATER_RETRIES`, default 1; 0 = off). When the *only* FAIL is the
+theater check (every new test passes on the unfixed base, or fails there for the wrong reason /
+still fails with the fix) and everything else is green, the implementer continues once more from
+its candidate checkpoint with the per-test reasons and the base pytest output, keeps the fix and
+writes a test that bites (it can run its tests on the unfixed source with `run_tests_unfixed`),
+within min(20, max turns / 3) extra turns and the same per-issue cost cap. Verify then reruns;
+the verdict is the last attempt's and says "repro found on retry 1", and the first attempt's
+verdict, candidate and evidence stay as `*.attempt1.*`. A red suite, a regression or an unmet
+spec behaviour never retries.
+
 **Best-of-N** (`WARDEN_CANDIDATES=N`, `warden eval --candidates N`; default 1). After one plan,
 the implementer runs up to N times, each candidate on its own fork of the same base checkpoint,
 and every candidate goes through all four checks above. Candidates run one after another and

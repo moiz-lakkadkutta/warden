@@ -120,7 +120,7 @@ def doctor(
     ] = False,
 ) -> None:
     """Check local tools, credentials and (optionally) model reachability. No network by default."""
-    from warden.config import MAX_CANDIDATES, load_settings
+    from warden.config import MAX_CANDIDATES, MAX_THEATER_RETRIES, load_settings
 
     print("warden doctor", file=sys.stderr)
     s = load_settings()
@@ -195,6 +195,13 @@ def doctor(
             f"WARDEN_CANDIDATES ({s.candidates})",
             1 <= s.candidates <= MAX_CANDIDATES,
             f"set WARDEN_CANDIDATES to 1-{MAX_CANDIDATES} (1 = one implementer run per issue)",
+        )
+    )
+    checks.append(
+        (
+            f"WARDEN_THEATER_RETRIES ({s.theater_retries or 'off'})",
+            0 <= s.theater_retries <= MAX_THEATER_RETRIES,
+            f"set WARDEN_THEATER_RETRIES to 0-{MAX_THEATER_RETRIES} (0 = a theater FAIL is final)",
         )
     )
     checks.append(
