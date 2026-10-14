@@ -12,7 +12,7 @@ import shutil
 import sys
 from collections.abc import Iterator
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, cast
 
 import typer
 
@@ -20,7 +20,9 @@ from warden import ui
 from warden.ui import fail
 
 if TYPE_CHECKING:
+    from warden.config import Settings
     from warden.runlog.events import EventLog
+    from warden.schemas import Phase
 
 app = typer.Typer(
     name="warden",
@@ -68,11 +70,14 @@ def _guarded(log: EventLog) -> Iterator[None]:
     from warden.llm.client import ProviderBudgetError
     from warden.llm.cost import CostCapExceededError
     from warden.pipeline import NotReadyError
+    from warden.sandbox.external import BaseBuildError
 
     try:
         yield
     except CostCapExceededError as e:  # cost.py already emitted the cost_cap event
         fail(str(e), run_id=log.run_id, code=4, exc=e)
+    except BaseBuildError as e:
+        fail(str(e), fix=e.fix, run_id=log.run_id, code=3, exc=e)
     except ProviderBudgetError as e:  # client.py already emitted the error event
         fail(str(e), fix=f"{e.fix} {log.run_id}", run_id=log.run_id, code=4, exc=e)
     except PrOpenError as e:
@@ -164,6 +169,27 @@ def doctor(
             f"WARDEN_READ_CACHE ({'on' if s.read_cache else 'off'})",
             True,
             "implementer read-loop guards",
+        )
+    )
+    checks.append(
+        (
+            f"WARDEN_TEST_CMD ({s.test_cmd or f'unset: {s.gate_profile} suite'})",
+            True,
+            "set WARDEN_TEST_CMD to the repo's own test command (gate suite + regression check)",
+        )
+    )
+    checks.append(
+        (
+            f"WARDEN_BASE_BRANCH ({s.base_branch or 'unset'})",
+            bool(s.base_branch.strip()),
+            "set WARDEN_BASE_BRANCH to the branch fix PRs target, e.g. main",
+        )
+    )
+    checks.append(
+        (
+            f"WARDEN_PR_TEMPLATE ({s.pr_template or 'built-in'})",
+            not s.pr_template or Path(s.pr_template).expanduser().is_file(),
+            "point WARDEN_PR_TEMPLATE at a markdown file, or unset it for the built-in body",
         )
     )
     checks.append((".env not tracked by git", not _env_tracked(), "git rm --cached .env"))
@@ -313,6 +339,41 @@ def run(
             "verify run on that code, issue comments are hidden, the PR targets warden/base-<sha>.",
         ),
     ] = None,
+    repo: Annotated[
+        str | None,
+        typer.Option(
+            "--repo",
+            help="A public GitHub repo (owner/name) to fix the issue in: Warden clones its default "
+            "branch head into a sandbox, installs it with test deps and caches that checkpoint.",
+        ),
+    ] = None,
+    test_cmd: Annotated[
+        str | None,
+        typer.Option(
+            "--test-cmd",
+            help="The repo's own test command, no file args (default: WARDEN_TEST_CMD; with "
+            "--repo, detected: python -m pytest).",
+        ),
+    ] = None,
+    install_cmd: Annotated[
+        str | None,
+        typer.Option(
+            "--install-cmd",
+            help="With --repo: the install command run in the clone (default: detected from "
+            "pyproject.toml / uv.lock / requirements files).",
+        ),
+    ] = None,
+    no_pr: Annotated[
+        bool,
+        typer.Option(
+            "--no-pr",
+            help="Stop after Verify: no push, no fork, no PR (same as --stop-after verify).",
+        ),
+    ] = False,
+    stop_after: Annotated[
+        str | None,
+        typer.Option("--stop-after", help="Stop after this phase: hunt, plan, fix or verify."),
+    ] = None,
 ) -> None:
     """Hunt → plan → fix → verify → PR for one issue. Prints run_id first (see `warden resume`)."""
     from warden.config import load_settings
@@ -322,6 +383,18 @@ def run(
     s = load_settings()
     if max_usd is not None:
         s.max_usd_per_issue = max_usd
+    if test_cmd is not None:
+        s.test_cmd = test_cmd
+    stop = _stop_phase(dry_run=dry_run, no_pr=no_pr, stop_after=stop_after)
+    if repo is not None:
+        from warden.sandbox.external import valid_repo
+
+        if not valid_repo(repo):
+            fail(
+                f"--repo {repo!r} is not owner/name", fix="e.g. --repo collective/icalendar", code=2
+            )
+    elif install_cmd is not None:
+        fail("--install-cmd needs --repo", fix="add --repo owner/name", code=2)
     if run_id is not None and (s.runs_dir / run_id / "run.json").exists():
         fail(
             f"run {run_id} already exists",
@@ -338,7 +411,7 @@ def run(
             import warden.demo
 
             result = warden.demo.run_demo(
-                s, log, dry_run=dry_run, progress=progress, yes=yes, json_out=json_out
+                s, log, stop_after=stop, progress=progress, yes=yes, json_out=json_out
             )
             if not json_out:
                 _err(result["evidence"])
@@ -361,6 +434,8 @@ def run(
             )
         from warden.pipeline import live_steps, run_pipeline
 
+        if repo is not None:
+            s = _external_settings(s, log, repo, test_cmd=test_cmd, install_cmd=install_cmd)
         result = run_pipeline(
             s,
             log,
@@ -369,12 +444,56 @@ def run(
             json_out=json_out,
             yes=yes,
             progress=progress,
-            stop_after="plan" if dry_run else None,
+            stop_after=stop,
             requested_issue=issue,
             at_rev=at,
         )
         if not json_out:
             _err(result["evidence"])
+
+
+STOPS = ("hunt", "plan", "fix", "verify")
+EXTERNAL_BASE = "base.json"  # runs/<id>/base.json: a --repo run's checkpoint, re-applied on resume
+
+
+def _stop_phase(*, dry_run: bool, no_pr: bool, stop_after: str | None) -> Phase | None:
+    """--dry-run = plan, --no-pr = verify, --stop-after <phase>; two different stops is an error."""
+    if stop_after is not None and stop_after not in STOPS:
+        fail(
+            f"--stop-after {stop_after!r} is not a phase", fix=f"one of: {', '.join(STOPS)}", code=2
+        )
+    asked = {p for p in ("plan" if dry_run else None, "verify" if no_pr else None, stop_after) if p}
+    if len(asked) > 1:
+        fail(
+            f"--dry-run, --no-pr and --stop-after disagree ({', '.join(sorted(asked))})",
+            fix="pass one of them",
+            code=2,
+        )
+    return cast("Phase | None", next(iter(asked), None))
+
+
+def _external_settings(
+    s: Settings, log: EventLog, repo: str, *, test_cmd: str | None, install_cmd: str | None
+) -> Settings:
+    """Build (or reuse) the sandbox base for a public repo; the run's settings point at it."""
+    from warden.sandbox.box import ContreeBackend
+    from warden.sandbox.external import prepare_base, remote_head
+
+    head = remote_head(repo)
+    _err(f"base: {repo}@{head.sha[:7]} ({head.branch}) — building or reusing the sandbox base")
+    backend = ContreeBackend(s.nebius_api_key, s.contree_base_url, s.nebius_project_id)
+    base = prepare_base(
+        backend,
+        log,
+        repo,
+        head,
+        cache_path=s.runs_dir / ".bases.json",
+        install_cmd=install_cmd,
+        test_cmd=test_cmd or s.test_cmd or None,
+    )
+    _err(f"base: {base.image} ({'cached' if base.cached else 'built'}) · tests: {base.test_cmd}")
+    (log.dir / EXTERNAL_BASE).write_text(base.to_json(), encoding="utf-8")
+    return s.model_copy(update=base.overrides())
 
 
 @app.command("eval")
@@ -468,6 +587,11 @@ def resume(
         )
     manifest = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
     mode = manifest.get("mode")
+    if (run_dir / EXTERNAL_BASE).exists():  # a --repo run: same base, repo and test command
+        from warden.sandbox.external import ExternalBase
+
+        ext = ExternalBase.from_json((run_dir / EXTERNAL_BASE).read_text(encoding="utf-8"))
+        s = s.model_copy(update=ext.overrides())
     log = EventLog(s.runs_dir, run_id, json_stream=stdout_stream() if json_out else None)
     _err(f"run_id {run_id}   (resuming after {done[-1] if done else 'start'})")
     progress = ui.PhaseLog()

@@ -220,11 +220,13 @@ def run_demo(
     log: EventLog,
     *,
     dry_run: bool = False,
+    stop_after: Phase | None = None,
     progress: Progress | None = None,
     yes: bool = False,
     json_out: bool = False,
 ) -> dict[str, Any]:
-    """`warden run --demo`: the demo steps through the machine. `--dry-run` stops after plan."""
+    """`warden run --demo`: the demo steps through the machine. `--dry-run` stops after plan,
+    `stop_after` after that phase (`--no-pr`: verify)."""
     return run_pipeline(
         s,
         log,
@@ -233,5 +235,5 @@ def run_demo(
         json_out=json_out,
         yes=yes,
         progress=progress,
-        stop_after="plan" if dry_run else None,
+        stop_after="plan" if dry_run else stop_after,
     )
