@@ -38,6 +38,23 @@ def test_theater_check_detects_real_and_fake_tests(tmp_path: Path) -> None:
     assert theater_check(base, new).failed_on_base is False
 
 
+def test_theater_check_runs_the_new_tests_on_the_candidate_too(tmp_path: Path) -> None:
+    b = FakeBackend()
+    log = _log(tmp_path)
+    base = Box.from_ref(b, "base", log)
+    cand = Box.from_ref(b, "cand", log)
+    new = {"tests/test_new.py": b"..."}
+    b.images[base.uuid].test_results["tests/test_new.py"] = 1
+    b.images[cand.uuid].test_results["tests/test_new.py"] = 0  # the fix makes it pass
+    ok = theater_check(base, new, candidate=cand)
+    assert ok.failed_on_base is True and ok.candidate_outcomes == {}
+    assert ok.reasons == {"tests/test_new.py": "repro: fails on base, passes with the fix"}
+    b.images[cand.uuid].test_results["tests/test_new.py"] = 1  # still red with the fix
+    bad = theater_check(base, new, candidate=cand)
+    assert bad.failed_on_base is False and bad.invalid is True
+    assert bad.reasons["tests/test_new.py"].endswith("and still fails with the fix")
+
+
 def test_events_are_logged(tmp_path: Path) -> None:
     b = FakeBackend()
     log = _log(tmp_path)

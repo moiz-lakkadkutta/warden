@@ -132,3 +132,36 @@ def test_failed_regression_and_spec_rows_name_what_broke() -> None:
     body = evidence_table(1, "t", _bare_plan(), v, cost_usd=0, calls_by_model={})
     assert "| Existing tests on candidate | 1 test green on base is red" in body
     assert "| Issue's stated behaviours | 1 of 2 stated behaviours not implemented" in body
+
+
+def test_evidence_table_shows_an_invalid_repro_and_each_new_tests_reason() -> None:
+    plan = Plan(
+        issue=1928,
+        summary="s",
+        files_to_touch=["a.py"],
+        tests_to_add=["t.py"],
+        landing_order=[],
+        risk_class=["none"],
+        citations=[],
+        acceptance=[],
+    )
+    v = Verdict(
+        decision="FAIL",
+        theater_failed_on_base=False,
+        theater_invalid=True,
+        theater_tests={
+            "src/x/tests/test_recur.py::test_xcal": "invalid: fails on base (AssertionError), "
+            "and still fails with the fix",
+            "src/x/tests/test_jcal.py::test_jcal": "repro: fails on base (AssertionError), "
+            "passes with the fix",
+        },
+        mypy_ok=True,
+        ruff_ok=True,
+        alembic_single_head=True,
+        openapi_drift=False,
+    )
+    body = evidence_table(1928, "t", plan, v, cost_usd=0.2, calls_by_model={})
+    row = next(line for line in body.splitlines() if line.startswith("| New tests on unfixed"))
+    assert "invalid repro" in row and "tests are theater" not in row
+    assert "`test_recur.py::test_xcal`: invalid: fails on base (AssertionError), and still" in row
+    assert "<br>`test_jcal.py::test_jcal`: repro: fails on base" in row

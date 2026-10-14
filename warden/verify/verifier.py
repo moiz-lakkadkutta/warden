@@ -1,7 +1,8 @@
 """theater + gate + candidate → Verdict, deterministically.
 
 FAIL when the fix is not shown to work or not shown to be tested: the implementer did not finish,
-added no tests, the new tests pass on the unfixed base (theater), the suite fails, or any gate
+added no tests, the new tests pass on the unfixed base (theater) or fail there only for the wrong
+reason / still fail with the fix (invalid repro), the suite fails, or any gate
 check is red (a red lint is exactly what the target's CI would reject). PASS_WITH_CONCERNS when the
 only doubt is an inconclusive theater run. Checks the image cannot run are listed in
 `not_verified` and never block. The regression check (existing tests green on base, red on the
@@ -41,9 +42,12 @@ def decide(
 
     failed_on_base = bool(theater and theater.failed_on_base)
     inconclusive = bool(theater and theater.inconclusive)
+    invalid = bool(theater and theater.invalid)
     if theater is not None:
         if failed_on_base:
             passed.append("a new test fails on the unfixed base (theater check)")
+        elif invalid:
+            fail.append(f"theater: invalid repro — {theater.why}")
         elif inconclusive:
             concerns.append(f"theater check inconclusive (pytest exit {theater.exit_code})")
         else:
@@ -94,6 +98,8 @@ def decide(
         decision=decision,  # type: ignore[arg-type]
         theater_failed_on_base=failed_on_base,
         theater_inconclusive=inconclusive,
+        theater_invalid=invalid,
+        theater_tests=dict(theater.reasons) if theater else {},
         suite=dict(gate.suite) if gate else {},
         mypy_ok=bool(gate and gate.mypy_ok),
         ruff_ok=bool(gate and gate.ruff_ok),

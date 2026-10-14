@@ -125,7 +125,14 @@ class RaceResult(BaseModel):
 class Verdict(BaseModel):
     decision: Decision
     theater_failed_on_base: bool
-    theater_inconclusive: bool = False  # collection error / no tests ran on base: not proof
+    theater_inconclusive: bool = False  # no tests ran / no per-test outcomes on base: not proof
+    # red on base for a reason that is not the issue's (NameError, fixture, collection error), or
+    # a new test still red with the fix: the repro does not count (verify/theater.py)
+    theater_invalid: bool = False
+    theater_tests: dict[str, str] = Field(
+        default_factory=dict,
+        description="New test node id -> why it does or does not count as a repro.",
+    )
     suite: dict[str, int] = Field(
         default_factory=dict, description="e.g. {'passed': 214, 'failed': 0}"
     )
