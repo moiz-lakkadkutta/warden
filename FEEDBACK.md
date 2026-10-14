@@ -111,6 +111,14 @@ Every entry: date · tool · what happened · numbers · what would have helped.
 - 2026-10-10 · B5 · Super's whole-file rewrites (`write_file` content) end without a trailing
   newline. On Fabric#220 that was the ONLY CI failure (ruff W292 in both files; pytest, E2E,
   OpenAPI drift, frontend all green). Fixed deterministically in Warden's write_file.
+- 2026-10-14 · tool calls · Nemotron 3 Super invents tool arguments that are not in the declared
+  function schema, and mistypes them: on collective/icalendar#1928 (run 20261014-122844-b9ee) it
+  sent `read_file{start_line: 940, end_line: "970"}` (an undeclared key, integer as a string) 9 times
+  in 25 turns, although the parameters schema says `additionalProperties: false` and lists every
+  key as required (Warden does not set the function-level `strict` flag). Every one was rejected,
+  and the run ended with no change ($0.084 implementer, $0.11 total). Warden now accepts `end_line`
+  (f114db8). → document whether Token Factory honours `strict: true` on tool definitions for
+  Nemotron, so schema-conformant arguments can be guaranteed instead of validated after the fact.
 - (fill in after Phase B3) Lightning as a tool router: turn count, wrong-tool rate.
 
 ## Nebius Serverless
