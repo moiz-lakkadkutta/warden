@@ -54,6 +54,9 @@ class SandboxBackend(Protocol):
     def uuid_of(self, image: Any) -> str: ...
 
 
+TIMEOUT_EXIT = 124
+
+
 class ContreeBackend:
     """Real backend. Constructed only when NEBIUS_API_KEY, CONTREE_BASE_URL and NEBIUS_PROJECT_ID
     are set. Auth is Nebius IAM: bearer token + `Project` header (the SDK's IAMAuth sends both)."""
@@ -93,7 +96,15 @@ class ContreeBackend:
             kwargs["env"] = env
         if files:
             kwargs["files"] = files
-        res = image.run(**kwargs).wait()  # run() only prepares; wait() executes
+        try:
+            res = image.run(**kwargs).wait()  # run() only prepares; wait() executes
+        except Exception as err:
+            # contree_sdk's OperationTimedOutError, matched by name so the SDK stays a lazy
+            # import. Exit code, not exception: a slow command is evidence for the caller (124 is
+            # timeout(1)'s convention). No checkpoint survives a timed-out run.
+            if type(err).__name__ != "OperationTimedOutError":
+                raise
+            return "", f"warden: command timed out after {timeout} s", TIMEOUT_EXIT, None, ""
         stdout = res.stdout.decode() if isinstance(res.stdout, bytes) else str(res.stdout or "")
         stderr = res.stderr.decode() if isinstance(res.stderr, bytes) else str(res.stderr or "")
         if not keep:

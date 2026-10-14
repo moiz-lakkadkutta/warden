@@ -139,3 +139,39 @@ def test_contree_backend_resolves_tags_strictly_so_events_carry_uuids() -> None:
     assert backend.use("warden/fabric-base:latest") == "img"
     assert calls == [("warden/fabric-base:latest", {"strict": True})]
     assert backend.use("docker://ghcr.io/x/y:1") == "oci"
+
+
+def test_contree_timeout_is_exit_124_not_an_exception() -> None:
+    from warden.sandbox.box import TIMEOUT_EXIT, ContreeBackend
+
+    class OperationTimedOutError(Exception):  # stands in for contree_sdk's (never imported here)
+        pass
+
+    class _Image:
+        def run(self, **kw: object) -> _Image:
+            return self
+
+        def wait(self) -> None:
+            raise OperationTimedOutError("op has timed out")
+
+    backend = ContreeBackend.__new__(ContreeBackend)  # no SDK client needed for run()
+    for keep in (False, True):
+        out = backend.run(
+            _Image(), shell="sleep 99", cwd="/", env=None, timeout=10, files=None, keep=keep
+        )
+        assert out == ("", "warden: command timed out after 10 s", TIMEOUT_EXIT, None, "")
+
+
+def test_other_contree_errors_still_raise() -> None:
+    from warden.sandbox.box import ContreeBackend
+
+    class _Image:
+        def run(self, **kw: object) -> _Image:
+            return self
+
+        def wait(self) -> None:
+            raise ValueError("boom")
+
+    backend = ContreeBackend.__new__(ContreeBackend)
+    with pytest.raises(ValueError):
+        backend.run(_Image(), shell="x", cwd="/", env=None, timeout=1, files=None, keep=False)

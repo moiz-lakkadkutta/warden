@@ -42,7 +42,8 @@ ROW: dict[str, Any] = {
     "docker_image": "swerebench/sweb.eval.x86_64.0b01001001_1776_spectree-64",
     "problem_statement": "### [BUG] description for query params\nHi, it does not show.\n",
     "FAIL_TO_PASS": ["tests/test_utils.py::test_parse_params"],
-    "PASS_TO_PASS": ["tests/test_utils.py::test_comments", "tests/test_x.py::test_p[a b]"],
+    # the dataset cuts ids at the first space: pytest's `test_p[a b]` is listed as `test_p[a`
+    "PASS_TO_PASS": ["tests/test_utils.py::test_comments", "tests/test_new.py::test_p[a"],
     "test_patch": TEST_PATCH,
     "install_config": {"test_cmd": "pytest --no-header -rA --tb=line -p no:cacheprovider"},
     "patch": "diff --git a/gold b/gold",  # the gold patch: must never be cached
@@ -120,10 +121,12 @@ def test_grade_command_resets_hidden_test_files_then_applies_and_runs() -> None:
     )
     assert reset in cmd
     assert cmd.index(reset) < cmd.index("git apply /tmp/warden-test.patch") < cmd.index("pytest")
-    assert "'tests/test_x.py::test_p[a b]'" in cmd  # quoted: parametrize ids may have spaces
+    # the test command runs on the patch's files, never on the (cut-off) ids
+    assert cmd.endswith("-p no:cacheprovider tests/test_utils.py tests/test_new.py")
+    assert "test_parse_params" not in cmd and "test_p[a" not in cmd
 
 
-def test_parse_test_lines_keeps_ids_with_spaces_and_drops_failure_messages() -> None:
+def test_parse_test_lines_cuts_ids_at_the_first_space_like_the_dataset() -> None:
     out = (
         "PASSED tests/test_x.py::test_p[a b]\n"
         "FAILED tests/test_utils.py::test_parse_params - AssertionError: assert {'in': 1}\n"
@@ -131,7 +134,7 @@ def test_parse_test_lines_keeps_ids_with_spaces_and_drops_failure_messages() -> 
         "1 failed, 1 passed in 0.5s\n"
     )
     assert swe.parse_test_lines(out) == {
-        "tests/test_x.py::test_p[a b]": "passed",
+        "tests/test_x.py::test_p[a": "passed",
         "tests/test_utils.py::test_parse_params": "failed",
         "tests/test_y.py::test_e": "error",
     }
@@ -147,8 +150,8 @@ class _StubBox:
         return RunResult(self.stdout, "", self.code, None, 1)
 
 
-def _passed(*ids: str) -> str:
-    return "".join(f"PASSED {i}\n" for i in ids)
+def _passed(*ids: str) -> str:  # what pytest prints: the full id, `[a b]` included
+    return "".join(f"PASSED {i.replace('[a', '[a b]')}\n" for i in ids)
 
 
 def test_grade_resolved_only_when_every_listed_test_passes() -> None:
@@ -253,3 +256,19 @@ def test_swe_gate_runs_only_the_suite_and_reports_the_rest_not_verified(log: Eve
     assert v.decision == "PASS"
     unchecked = ("mypy", "ruff", "alembic", "OpenAPI")
     assert not any(name in r for r in v.reasons for name in unchecked)
+
+
+def test_prepare_base_installs_the_env_wrapper_and_a_python_m_pytest_shim(log: EventLog) -> None:
+    backend = FakeBackend()
+    base = swe.prepare_base(backend, swe.Task.from_row(ROW), log)
+    files = backend.images[base.uuid].files
+    wrapper = files[swe.WRAPPER].decode()
+    shim = files[f"{swe.SHIM_DIR}/pytest"].decode()
+    assert 'exec python -m pytest "$@"' in shim
+    # shim first, then miniconda's env, then /opt/conda's (last prepend wins)
+    assert (
+        wrapper.index("/opt/conda/envs")
+        < wrapper.index("/opt/miniconda3")
+        < wrapper.index(swe.SHIM_DIR)
+    )
+    assert backend.calls[-1] == f"chmod +x {swe.WRAPPER} {swe.SHIM_DIR}/pytest"

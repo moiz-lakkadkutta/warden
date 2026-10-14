@@ -40,14 +40,20 @@ WORKDIR = "/testbed"
 ENV_BINS = ("/opt/miniconda3/envs/testbed/bin", "/opt/conda/envs/testbed/bin")  # images vary
 WRAPPER = "/usr/local/bin/testbed-env"
 WRAP = "testbed-env sh -c"
+SHIM_DIR = "/usr/local/warden-bin"
 WRAPPER_SCRIPT = (
     "#!/bin/sh\n"
     "# Warden: run a command with the task's conda env first on PATH (when the image has one).\n"
     + "".join(
         f'if [ -d {d} ]; then PATH="{d}:$PATH"; export PATH; fi\n' for d in reversed(ENV_BINS)
     )
+    + f'PATH="{SHIM_DIR}:$PATH"; export PATH\n'
     + 'exec "$@"\n'
 )
+# Some images ship a `pytest` whose shebang names a different env than the one the package is
+# installed in (PennyLaneAI__pennylane-5831: plain `pytest` cannot import pennylane, while
+# `python -m pytest` can). Every pytest call goes through the env's python instead.
+PYTEST_SHIM = '#!/bin/sh\nexec python -m pytest "$@"\n'
 TEST_PATCH = "/tmp/warden-test.patch"
 GRADE_TIMEOUT = 1800
 
@@ -64,7 +70,7 @@ CSV_COLUMNS = (
 )
 
 _DIFF_HEADER = re.compile(r"^diff --git a/(\S+) b/(\S+)$", re.MULTILINE)
-_OUTCOME_LINE = re.compile(r"^(PASSED|FAILED|ERROR|SKIPPED|XFAIL|XPASS) (.+?)(?: - .*)?$")
+_STATUSES = ("PASSED", "FAILED", "ERROR", "SKIPPED", "XFAIL", "XPASS")
 
 
 class Task(BaseModel):
@@ -185,10 +191,10 @@ def prepare_base(backend: SandboxBackend, task: Task, log: EventLog) -> Box:
     """The task image plus the `testbed-env` wrapper, as a kept checkpoint (the run's base)."""
     image = Box.from_ref(backend, task.tag, log, phase="hunt")
     res = image.run(
-        f"chmod +x {WRAPPER}",
+        f"chmod +x {WRAPPER} {SHIM_DIR}/pytest",
         cwd="/",
         keep=True,
-        files={WRAPPER: WRAPPER_SCRIPT.encode()},
+        files={WRAPPER: WRAPPER_SCRIPT.encode(), f"{SHIM_DIR}/pytest": PYTEST_SHIM.encode()},
     )
     if not res.ok or res.box is None:
         raise RuntimeError(f"could not prepare {task.tag}: {res.stderr.strip()[:200]}")
@@ -227,24 +233,27 @@ def test_files(patch: str) -> list[str]:
 
 def grade_command(task: Task) -> str:
     """Reset the hidden-test files to the base commit (a file new in the patch is removed), apply
-    the test patch, run FAIL_TO_PASS + PASS_TO_PASS."""
+    the test patch, run the task's test command on those files — as the official harness does.
+    Not on the FAIL_TO_PASS / PASS_TO_PASS ids: the dataset cuts them at the first space
+    (`test_label[op0-None-Exp((2+3j)`), and pytest refuses the whole run on one bad id."""
+    files = test_files(task.test_patch)
     parts = []
-    for f in test_files(task.test_patch):
+    for f in files:
         q = shlex.quote(f)
         parts.append(f"{{ git checkout -q {task.base_commit} -- {q} 2>/dev/null || rm -f {q}; }}")
     parts.append(f"git apply {TEST_PATCH}")
-    tests = " ".join(shlex.quote(t) for t in task.fail_to_pass + task.pass_to_pass)
-    parts.append(f"{task.test_cmd} {tests}")
+    parts.append(f"{task.test_cmd} {' '.join(shlex.quote(f) for f in files)}")
     return " && ".join(parts)
 
 
 def parse_test_lines(output: str) -> dict[str, str]:
-    """`-rA` summary lines → {node id: outcome}; ids may contain spaces (parametrize)."""
+    """`-rA` summary lines → {test id: outcome}, the id cut at the first space like the
+    dataset's own ids (SWE-bench's parse_log_pytest)."""
     outcomes: dict[str, str] = {}
     for line in output.splitlines():
-        m = _OUTCOME_LINE.match(line.rstrip())
-        if m:
-            outcomes[m.group(2)] = m.group(1).lower()
+        words = line.split()
+        if len(words) >= 2 and words[0] in _STATUSES:
+            outcomes[words[1]] = words[0].lower()
     return outcomes
 
 

@@ -262,7 +262,7 @@ def test_shell_timeout_caps_and_phase(log: EventLog) -> None:
     d.dispatch(box, "run_shell", {"command": "echo hi", "timeout": 120})
     assert backend.timeouts[-1] == 30
     d.dispatch(box, "run_shell", {"command": "echo hi", "timeout": 5})
-    assert backend.timeouts[-1] == 5
+    assert backend.timeouts[-1] == 30  # the floor never exceeds the configured cap
     events = _events(log)
     assert all(e.phase == "verify" for e in events if e.kind == "tool")
 
@@ -448,3 +448,16 @@ def test_write_file_adds_the_missing_final_newline(log: EventLog) -> None:
     assert backend.images[kept.box.uuid].files["/app/a.py"] == b"x = 1\n"
     empty = d.dispatch(box, "write_file", {"path": "__init__.py", "content": ""})
     assert backend.images[empty.box.uuid].files["/app/__init__.py"] == b""
+
+
+def test_model_chosen_shell_timeouts_have_a_floor(log: EventLog) -> None:
+    # SWE-rebench spikeinterface-2775: Super passed timeout=10 / 30 to `pip install -e .` and a
+    # first pytest import; the sandbox op timed out and the task was lost
+    from warden.fix.tools import MIN_SHELL_TIMEOUT
+
+    backend, box, _ = _setup(log)
+    d = ToolDispatcher(log)
+    d.dispatch(box, "run_shell", {"command": "echo hi", "timeout": 10})
+    assert backend.timeouts[-1] == MIN_SHELL_TIMEOUT == 120
+    d.dispatch(box, "run_shell", {"command": "echo hi", "timeout": 300})
+    assert backend.timeouts[-1] == 300

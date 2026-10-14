@@ -183,6 +183,9 @@ def _ms(t0: float) -> int:
     return int((time.perf_counter() - t0) * 1000)
 
 
+MIN_SHELL_TIMEOUT = 120
+
+
 class ToolDispatcher:
     """Validates and executes one tool call over a Box; emits one `kind="tool"` event per call."""
 
@@ -299,7 +302,9 @@ class ToolDispatcher:
                 child, name, True, f"wrote {len(data)} bytes to {parsed.path}", 0, t0
             )
         if isinstance(parsed, RunShellArgs):
-            timeout = min(parsed.timeout, self._shell_timeout)
+            # Models pick tight limits (10 s, 30 s) for installs and suites; a floor keeps a
+            # slow first import from looking like a failure.
+            timeout = min(self._shell_timeout, max(MIN_SHELL_TIMEOUT, parsed.timeout))
             command = parsed.command
             if self._shell_wrap:
                 command = f"{self._shell_wrap} {shlex.quote(command)}"

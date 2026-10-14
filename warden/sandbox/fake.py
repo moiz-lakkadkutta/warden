@@ -67,7 +67,8 @@ class FakeBackend:
         child = self._new(image) if keep else image
         if files:
             for rel, data in files.items():
-                child.files[f"{cwd.rstrip('/')}/{rel}"] = data
+                path = rel if rel.startswith("/") else f"{cwd.rstrip('/')}/{rel}"
+                child.files[path] = data
         stdout, stderr, code = self._interpret(child, shell, cwd)
         return stdout, stderr, code, (child if keep else None), child.uuid
 
@@ -81,7 +82,7 @@ class FakeBackend:
             return "", "fake backend: unknown command ||", 127
         if "|" in parts:
             parts = parts[: parts.index("|")]
-        if not parts or parts[0] == "true":
+        if not parts or parts[0] in ("true", "chmod"):
             return "", "", 0
         if parts[0] == "false":
             return "", "", 1
