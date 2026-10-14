@@ -175,6 +175,51 @@ def assistant_message(content: str | None, tool_calls: list[dict[str, Any]]) -> 
     return msg
 
 
+KEEP_RECENT = 6  # newest tool results (and write_file calls) sent whole
+ELIDE_MIN = 1500  # shorter outputs are cheap to keep
+
+
+def compact_history(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The history to send: older tool outputs become a one-line stub and older write_file
+    calls lose their content (the file is in the box, a read_file away). Without this every
+    earlier page is re-sent on every turn: on the SWE-rebench pilot prompts reached 173k tokens
+    (pennylane-5831, 3.0M prompt tokens in 34 calls). Pairing and order are untouched."""
+    tool_idx = [i for i, m in enumerate(messages) if m["role"] == "tool"]
+    call_idx = [
+        i for i, m in enumerate(messages) if m["role"] == "assistant" and m.get("tool_calls")
+    ]
+    old_tools = set(tool_idx[:-KEEP_RECENT]) if len(tool_idx) > KEEP_RECENT else set()
+    old_calls = set(call_idx[:-KEEP_RECENT]) if len(call_idx) > KEEP_RECENT else set()
+    if not old_tools and not old_calls:
+        return messages  # short history: nothing to elide, no copy
+    out: list[dict[str, Any]] = []
+    for i, m in enumerate(messages):
+        if i in old_tools and len(m["content"] or "") > ELIDE_MIN:
+            text = m["content"]
+            first = text.splitlines()[0][:120] if text else ""
+            m = {
+                **m,
+                "content": f"[elided by Warden after newer turns: {len(text)} chars; first line: "
+                f"{first!r}. Re-run the tool if you need it again.]",
+            }
+        elif i in old_calls:
+            m = {**m, "tool_calls": [_elide_write(c) for c in m["tool_calls"]]}
+        out.append(m)
+    return out
+
+
+def _elide_write(call: dict[str, Any]) -> dict[str, Any]:
+    fn = call["function"]
+    if fn["name"] != "write_file":
+        return call
+    args = json.loads(fn["arguments"])  # built by assistant_message: always valid JSON
+    content = args.get("content")
+    if not isinstance(content, str) or len(content) <= ELIDE_MIN:
+        return call
+    args["content"] = f"[{len(content)} chars written]"
+    return {**call, "function": {**fn, "arguments": json.dumps(args)}}
+
+
 def _tool_message(tool_call_id: str, content: str) -> dict[str, Any]:
     return {"role": "tool", "tool_call_id": tool_call_id, "content": content}
 
@@ -254,7 +299,7 @@ def run_implementer(
         max_tool_turns=max_tool_turns,
     )
     while report is None and turns < max_tool_turns:
-        res = llm.chat(Role.IMPLEMENTER, PHASE, messages, tools=ALL_TOOLS)
+        res = llm.chat(Role.IMPLEMENTER, PHASE, compact_history(messages), tools=ALL_TOOLS)
         cost += _charge(res, hooks)
         calls = res.tool_calls
         if not calls and res.content:

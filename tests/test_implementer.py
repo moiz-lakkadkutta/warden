@@ -646,3 +646,77 @@ def test_autofix_runs_once_after_finish_and_the_candidate_is_its_checkpoint(log:
     assert seen[-1].startswith("pytest") and seen[-2] == "true"
     assert _note(log, "autofix")["exit_code"] == 0
     assert cand.image_uuid == _note(log, "autofix")["image_uuid"]
+
+
+# ------------------------------------------------------------------ context growth (D3 pilot)
+
+
+def _history(n: int, size: int = 5000) -> list[dict[str, Any]]:
+    msgs: list[dict[str, Any]] = [
+        {"role": "system", "content": "S" * size},
+        {"role": "user", "content": "U" * size},
+    ]
+    for i in range(n):
+        args = {"path": f"f{i}.py", "content": "x" * size}
+        msgs.append(
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": f"c{i}",
+                        "type": "function",
+                        "function": {"name": "write_file", "arguments": json.dumps(args)},
+                    }
+                ],
+            }
+        )
+        msgs.append(
+            {"role": "tool", "tool_call_id": f"c{i}", "content": f"line {i}\n" + "y" * size}
+        )
+    return msgs
+
+
+def test_compact_history_elides_old_tool_output_and_write_content_only() -> None:
+    from warden.fix.implementer import KEEP_RECENT, compact_history
+
+    msgs = _history(10)
+    out = compact_history(msgs)
+    assert msgs == _history(10)  # the input is not modified
+    assert out[0] == msgs[0] and out[1] == msgs[1]  # system prompt and plan stay whole
+    tools = [m for m in out if m["role"] == "tool"]
+    writes = [m for m in out if m["role"] == "assistant"]
+    assert [m["tool_call_id"] for m in tools] == [f"c{i}" for i in range(10)]  # pairing intact
+    old, recent = tools[:-KEEP_RECENT], tools[-KEEP_RECENT:]
+    assert all(m["content"].startswith("[elided by Warden") for m in old)
+    assert "line 0" in old[0]["content"] and "5007 chars" in old[0]["content"]
+    assert recent == [m for m in msgs if m["role"] == "tool"][-KEEP_RECENT:]
+    first = json.loads(writes[0]["tool_calls"][0]["function"]["arguments"])
+    assert first == {"path": "f0.py", "content": "[5000 chars written]"}
+    last = json.loads(writes[-1]["tool_calls"][0]["function"]["arguments"])
+    assert last["content"] == "x" * 5000
+    long = _history(20)
+    assert (
+        sum(len(json.dumps(m)) for m in compact_history(long))
+        < sum(len(json.dumps(m)) for m in long) / 2
+    )
+
+
+def test_compact_history_leaves_short_outputs_and_short_histories_alone() -> None:
+    from warden.fix.implementer import compact_history
+
+    assert compact_history(_history(3)) == _history(3)
+    small = _history(10, size=100)
+    assert compact_history(small) == small
+
+
+def test_the_model_is_sent_the_compacted_history(log: EventLog) -> None:
+    env = _setup(log)
+    env.image.files["/app/big.py"] = ("z" * 3000 + "\n").encode()
+    reads = [turn(tool_call("read_file", path="big.py")) for _ in range(8)]
+    llm, _ = _run(env, [*reads, finish_turn()])
+    last = llm.calls[-1].messages
+    tool_msgs = [m for m in last if m["role"] == "tool"]
+    assert len(tool_msgs) == 8
+    assert tool_msgs[0]["content"].startswith("[elided by Warden")
+    assert tool_msgs[-1]["content"].startswith("z")
