@@ -430,6 +430,21 @@ def test_read_file_pages_by_whole_lines_with_a_continue_hint(log: EventLog) -> N
     assert past.ok is False and "100 lines" in past.output
 
 
+def test_read_file_accepts_an_end_line_range(log: EventLog) -> None:
+    # Nemotron Super asks for ranges with end_line, often as a string ("970"): on icalendar#1928
+    # 9 of 25 tool turns were rejected as invalid arguments before this existed.
+    _, box, img = _setup(log)
+    lines = [f"row {i:03d}\n" for i in range(1, 101)]
+    img.files["/app/big.py"] = "".join(lines).encode()
+    d = ToolDispatcher(log)
+    res = d.dispatch(box, "read_file", {"path": "big.py", "start_line": 40, "end_line": "42"})
+    assert res.ok and res.output == "".join(lines[39:42])
+    null = d.dispatch(box, "read_file", {"path": "big.py", "start_line": 99, "end_line": None})
+    assert null.output == "".join(lines[98:])
+    past = d.dispatch(box, "read_file", {"path": "big.py", "start_line": 95, "end_line": 500})
+    assert past.ok and past.output == "".join(lines[94:])
+
+
 def test_grep_supports_alternation(log: EventLog) -> None:
     _, box, img = _setup(log)
     img.files["/app/src/a.py"] = b"FOO = 1\nBAR = 2\nBAZ = 3\n"

@@ -179,6 +179,9 @@ class ReadFileArgs(ToolArgs):
     start_line: int = Field(
         1, ge=1, description="First line to return (1-based); use it to continue a long file."
     )
+    end_line: int | None = Field(
+        None, ge=1, description="Last line to return (inclusive); null reads to the page limit."
+    )
 
 
 class GrepArgs(ToolArgs):

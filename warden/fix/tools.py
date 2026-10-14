@@ -277,7 +277,10 @@ class ToolDispatcher:
             res = box.run(f"cat {shlex.quote(parsed.path)}", cwd=cwd, keep=False)
             if not res.ok:
                 return self._read(box, name, res, t0)
-            text, cut = page_lines(res.stdout, parsed.start_line, self._read_limit)
+            source = res.stdout
+            if parsed.end_line is not None:
+                source = "".join(source.splitlines(keepends=True)[: parsed.end_line])
+            text, cut = page_lines(source, parsed.start_line, self._read_limit)
             if text is None:
                 n = len(res.stdout.splitlines())
                 msg = f"start_line={parsed.start_line} is past the end ({n} lines)"
