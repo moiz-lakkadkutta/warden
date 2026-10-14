@@ -150,6 +150,13 @@ def doctor(
             f"set WARDEN_GATE_PROFILE to one of: {', '.join(PROFILES)}",
         )
     )
+    checks.append(
+        (
+            f"WARDEN_SPEC_CHECK ({'on' if s.spec_check else 'off'})",
+            True,
+            "set WARDEN_SPEC_CHECK=0 to skip the verifier's spec review (one Ultra call per issue)",
+        )
+    )
     checks.append((".env not tracked by git", not _env_tracked(), "git rm --cached .env"))
 
     if live:

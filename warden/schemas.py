@@ -118,6 +118,28 @@ class Verdict(BaseModel):
     not_verified: list[str] = Field(default_factory=list)
     concerns: list[str] = Field(default_factory=list)
     reasons: list[str] = Field(default_factory=list)
+    # existing base tests green on base, red on the candidate (verify/regression.py)
+    regressions: list[str] = Field(default_factory=list)
+    # behaviours the issue states, quoted, that the diff does not implement (verify/spec.py)
+    spec_unmet: list[str] = Field(default_factory=list)
+
+
+class SpecBehaviour(BaseModel):
+    behaviour: str = Field(
+        description="One behaviour the issue explicitly asks for, in a sentence."
+    )
+    quote: str = Field(description="The issue's own words that state it, copied verbatim.")
+    met: Literal["yes", "no", "unclear"] = Field(
+        description="yes: the diff implements it; no: it does not; unclear: cannot tell."
+    )
+    evidence: str = Field(description="The diff lines or test names that decide it.")
+
+
+class SpecReview(BaseModel):
+    """The verifier's read of the diff against the issue's stated behaviours."""
+
+    behaviours: list[SpecBehaviour]
+    summary: str = Field("", description="One sentence: does the diff do what the issue asks?")
 
 
 class Wave(BaseModel):

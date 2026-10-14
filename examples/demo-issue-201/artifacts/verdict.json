@@ -23,5 +23,7 @@
   "reasons": [
     "new test fails on base and passes on candidate",
     "race probe returns 1 effect"
-  ]
+  ],
+  "regressions": [],
+  "spec_unmet": []
 }

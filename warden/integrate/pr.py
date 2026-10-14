@@ -211,6 +211,17 @@ def evidence_table(
     not_verified = ", ".join(verdict.not_verified) or "—"
     calls = " · ".join(f"{m.split('/')[-1]} {n}" for m, n in calls_by_model.items())
 
+    def reason(*prefixes: str) -> str | None:
+        """The verifier's own line for a check, minus its prefix; None = the check did not run."""
+        for r in verdict.reasons:
+            for p in prefixes:
+                if r.startswith(p):
+                    return r[len(p) :]
+        return None
+
+    existing = reason("existing tests: ", "regression: ")
+    spec = reason("spec: ")
+
     lines = [
         f"## Warden evidence — #{issue} {title}",
         "",
@@ -221,6 +232,8 @@ def evidence_table(
         "|---|---|",
         f"| New tests on unfixed base | {theater}{link} |",
         f"| Full suite on candidate | {suite}{link} |",
+        *([f"| Existing tests on candidate | {existing} |"] if existing else []),
+        *([f"| Issue's stated behaviours | {spec} |"] if spec else []),
         f"| Race probe | {race} |",
         f"| Gate | {gate} |",
         f"| Not verified | {not_verified} |",

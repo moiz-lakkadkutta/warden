@@ -77,3 +77,58 @@ def test_evidence_table_says_inconclusive_and_shows_a_note() -> None:
         and "theater" not in body.split("New tests on unfixed base")[1].split("\n")[0]
     )
     assert "> Replay of #1." in body
+
+
+def _bare_plan() -> Plan:
+    return Plan(
+        issue=1,
+        summary="s",
+        files_to_touch=[],
+        tests_to_add=[],
+        landing_order=[],
+        risk_class=["none"],
+        citations=[],
+        acceptance=[],
+    )
+
+
+def _bare_verdict(**kw: object) -> Verdict:
+    base: dict[str, object] = dict(
+        decision="PASS",
+        theater_failed_on_base=True,
+        mypy_ok=True,
+        ruff_ok=True,
+        alembic_single_head=True,
+        openapi_drift=False,
+    )
+    base.update(kw)
+    return Verdict.model_validate(base)
+
+
+def test_regression_and_spec_rows_appear_only_when_those_checks_ran() -> None:
+    body = evidence_table(1, "t", _bare_plan(), _bare_verdict(), cost_usd=0, calls_by_model={})
+    assert "Existing tests" not in body and "Issue's stated behaviours" not in body
+    v = _bare_verdict(
+        reasons=[
+            "existing tests: 12 base tests in 2 files stay green",
+            "spec: 2 of 2 stated behaviours implemented",
+        ]
+    )
+    body = evidence_table(1, "t", _bare_plan(), v, cost_usd=0, calls_by_model={})
+    assert "| Existing tests on candidate | 12 base tests in 2 files stay green |" in body
+    assert "| Issue's stated behaviours | 2 of 2 stated behaviours implemented |" in body
+
+
+def test_failed_regression_and_spec_rows_name_what_broke() -> None:
+    v = _bare_verdict(
+        decision="FAIL",
+        regressions=["tests/test_x.py::a"],
+        spec_unmet=["keeps num_steps"],
+        reasons=[
+            "regression: 1 test green on base is red on the candidate (tests/test_x.py::a)",
+            "spec: 1 of 2 stated behaviours not implemented (keeps num_steps)",
+        ],
+    )
+    body = evidence_table(1, "t", _bare_plan(), v, cost_usd=0, calls_by_model={})
+    assert "| Existing tests on candidate | 1 test green on base is red" in body
+    assert "| Issue's stated behaviours | 1 of 2 stated behaviours not implemented" in body

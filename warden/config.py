@@ -69,6 +69,8 @@ class Settings(BaseSettings):
         default="moiz-lakkadkutta/Fabric-Inventory", alias="WARDEN_TARGET_REPO"
     )
     runs_dir: Path = Field(default=Path("runs"), alias="WARDEN_RUNS_DIR")
+    # Verifier's spec review: one VERDICT call comparing the diff with the issue's stated behaviours
+    spec_check: bool = Field(default=True, alias="WARDEN_SPEC_CHECK")
 
     def model_for(self, role: Role) -> str:
         return {

@@ -4,18 +4,29 @@ FAIL when the fix is not shown to work or not shown to be tested: the implemente
 added no tests, the new tests pass on the unfixed base (theater), the suite fails, or any gate
 check is red (a red lint is exactly what the target's CI would reject). PASS_WITH_CONCERNS when the
 only doubt is an inconclusive theater run. Checks the image cannot run are listed in
-`not_verified` and never block. An LLM verdict (Role.VERDICT) may add concerns later; it never
-upgrades a decision.
+`not_verified` and never block. The regression check (existing tests green on base, red on the
+candidate) and the spec review (a behaviour the issue states, quoted, that the diff does not
+implement) add FAIL reasons; their inconclusive or unclear results are concerns. The spec review
+is the one LLM input and it never upgrades a decision.
 """
 
 from __future__ import annotations
 
 from warden.schemas import Candidate, Verdict
 from warden.verify.gate import GateResult
+from warden.verify.regression import RegressionResult
+from warden.verify.spec import SpecResult
 from warden.verify.theater import TheaterResult
 
 
-def decide(cand: Candidate, theater: TheaterResult | None, gate: GateResult | None) -> Verdict:
+def decide(
+    cand: Candidate,
+    theater: TheaterResult | None,
+    gate: GateResult | None,
+    *,
+    regression: RegressionResult | None = None,
+    spec: SpecResult | None = None,
+) -> Verdict:
     fail: list[str] = []
     concerns: list[str] = []
     passed: list[str] = []
@@ -51,6 +62,27 @@ def decide(cand: Candidate, theater: TheaterResult | None, gate: GateResult | No
             if gate.ran(check):  # a check the profile does not run is in not_verified instead
                 (passed if ok else fail).append(f"{name} {'clean' if ok else 'red'}")
 
+    if regression is not None:
+        if regression.broken:
+            fail.append(f"regression: {regression.label} ({', '.join(regression.broken[:5])})")
+        elif regression.inconclusive:
+            concerns.append(f"regression check {regression.label}")
+        else:
+            passed.append(f"existing tests: {regression.label}")
+        if regression.changed_expectations:
+            concerns.append(
+                "edited tests changed expectations: "
+                + ", ".join(regression.changed_expectations[:5])
+            )
+
+    if spec is not None:
+        if spec.unmet:
+            fail.append(f"spec: {spec.label} ({'; '.join(spec.unmet[:5])})")
+        else:
+            passed.append(f"spec: {spec.label}")
+        if spec.unclear:
+            concerns.append(f"spec unclear: {'; '.join(spec.unclear[:5])}")
+
     decision = "FAIL" if fail else ("PASS_WITH_CONCERNS" if concerns else "PASS")
     return Verdict(
         decision=decision,  # type: ignore[arg-type]
@@ -64,4 +96,6 @@ def decide(cand: Candidate, theater: TheaterResult | None, gate: GateResult | No
         not_verified=list(gate.not_verified) if gate else ["gate"],
         concerns=concerns,
         reasons=fail + passed if fail else passed,
+        regressions=list(regression.broken) if regression else [],
+        spec_unmet=list(spec.unmet) if spec else [],
     )

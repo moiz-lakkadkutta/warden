@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from warden.schemas import Candidate
+from warden.schemas import Candidate, SpecReview
 from warden.verify.gate import GateResult, GateStep
+from warden.verify.regression import RegressionResult
+from warden.verify.spec import SpecResult
 from warden.verify.theater import TheaterResult
 from warden.verify.verifier import decide
 
@@ -88,3 +90,55 @@ def test_failing_suite_or_blocked_candidate_or_no_tests_is_fail() -> None:
 def test_no_gate_is_fail_never_pass() -> None:
     v = decide(_cand(), _theater(), None)
     assert v.decision == "FAIL" and any("gate" in r for r in v.reasons)
+
+
+# --------------------------------------------------------------- regression + spec (D3 false PASS)
+
+
+def _reg(
+    broken: list[str] | None = None, changed: list[str] | None = None, inconclusive: bool = False
+) -> RegressionResult:
+    return RegressionResult(
+        files=("tests/test_x.py",),
+        base={"tests/test_x.py::a": "passed"},
+        candidate={},
+        broken=broken or [],
+        changed_expectations=changed or [],
+        inconclusive=inconclusive,
+    )
+
+
+def _spec(unmet: list[str] | None = None, unclear: list[str] | None = None) -> SpecResult:
+    return SpecResult(SpecReview(behaviours=[], summary=""), unmet or [], unclear or [])
+
+
+def test_a_broken_base_test_fails_the_candidate() -> None:
+    v = decide(_cand(), _theater(), _green(), regression=_reg(broken=["tests/test_x.py::a"]))
+    assert v.decision == "FAIL"
+    assert v.regressions == ["tests/test_x.py::a"]
+    assert any("regression" in r for r in v.reasons)
+
+
+def test_changed_expectations_and_inconclusive_regression_are_concerns() -> None:
+    v = decide(_cand(), _theater(), _green(), regression=_reg(changed=["tests/test_x.py::a"]))
+    assert v.decision == "PASS_WITH_CONCERNS" and v.regressions == []
+    v = decide(_cand(), _theater(), _green(), regression=_reg(inconclusive=True))
+    assert v.decision == "PASS_WITH_CONCERNS"
+
+
+def test_clean_regression_is_a_pass_reason() -> None:
+    v = decide(_cand(), _theater(), _green(), regression=_reg())
+    assert v.decision == "PASS" and any("stay green" in r for r in v.reasons)
+
+
+def test_an_unmet_stated_behaviour_fails_and_unclear_is_a_concern() -> None:
+    v = decide(_cand(), _theater(), _green(), spec=_spec(unmet=["keeps num_steps"]))
+    assert v.decision == "FAIL" and v.spec_unmet == ["keeps num_steps"]
+    v = decide(_cand(), _theater(), _green(), spec=_spec(unclear=["keeps num_steps"]))
+    assert v.decision == "PASS_WITH_CONCERNS" and v.spec_unmet == []
+
+
+def test_without_regression_or_spec_the_old_decision_stands() -> None:
+    v = decide(_cand(), _theater(), _green())
+    assert v.decision == "PASS"
+    assert "fe codegen" in v.not_verified

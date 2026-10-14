@@ -25,7 +25,9 @@ from warden.schemas import Candidate, Phase, Plan, RunEvent, Verdict
 
 if TYPE_CHECKING:
     from warden.hunt.issue import IssueText
+    from warden.sandbox.box import Box
     from warden.verify.gate import GateCommands
+    from warden.verify.spec import SpecResult
 
 PHASES: tuple[Phase, ...] = ("hunt", "plan", "fix", "verify", "pr")
 MARKER: dict[Phase, str] = {
@@ -431,14 +433,24 @@ def planner_prompt(profile: str) -> str:
 def _live_verify(ctx: StepContext, plan: Plan, cand: Candidate) -> Verdict:
     from warden.verify.gate import PROFILES
 
-    return verify_candidate(ctx, cand, PROFILES[ctx.settings.gate_profile])
+    return verify_candidate(ctx, cand, PROFILES[ctx.settings.gate_profile], issue_number=plan.issue)
 
 
-def verify_candidate(ctx: StepContext, cand: Candidate, commands: GateCommands) -> Verdict:
-    """Theater check on the base, the gate on the candidate, then the deterministic verdict."""
+def verify_candidate(
+    ctx: StepContext,
+    cand: Candidate,
+    commands: GateCommands,
+    *,
+    issue_number: int = 0,
+    regression_cmd: str = "",
+) -> Verdict:
+    """Theater check on the base, the gate on the candidate, the regression check (when
+    `regression_cmd` is set: the repo's own test command, `-rA` output), the spec review (when
+    WARDEN_SPEC_CHECK is on), then the deterministic verdict."""
     import shlex
 
     from warden.verify.gate import run_gate
+    from warden.verify.regression import regression_check
     from warden.verify.theater import theater_check
     from warden.verify.verifier import decide
 
@@ -484,9 +496,43 @@ def verify_candidate(ctx: StepContext, cand: Candidate, commands: GateCommands) 
             for st in gate.steps
         ),
     )
-    verdict = decide(cand, theater, gate)
+    regression = None
+    if regression_cmd:
+        regression = regression_check(
+            base, candidate, test_cmd=regression_cmd, cwd=s.workdir, wrap=s.shell_wrap, timeout=600
+        )
+        label = (
+            regression.label if regression else "not run (no existing test names a changed module)"
+        )
+        ctx.log.note("verify", f"regression: {label}")
+        ctx.progress.step(f"regression: {label}")
+        if regression is not None:
+            ctx.log.artifact(
+                "regression.txt", f"files: {' '.join(regression.files)}\n\n{regression.output}"
+            )
+    spec = _spec_check(ctx, candidate, cand, issue_number) if s.spec_check else None
+    verdict = decide(cand, theater, gate, regression=regression, spec=spec)
     ctx.progress.step(f"verdict: {verdict.decision}")
     return verdict
+
+
+def _spec_check(ctx: StepContext, candidate: Box, cand: Candidate, issue_number: int) -> SpecResult:
+    """One VERDICT call: the candidate diff against the issue's stated behaviours. Comments are
+    never sent (on a replay they hold the human plan)."""
+    from warden.hunt.issue import fetch_issue
+    from warden.llm.client import LLM
+    from warden.llm.cost import CostMeter
+    from warden.verify.spec import spec_review
+
+    s = ctx.settings
+    issue = ctx.issue or fetch_issue(s.target_repo, issue_number, include_comments=False)
+    diff = candidate.run("git add -A -N . && git diff HEAD", cwd=s.workdir, keep=False).stdout
+    llm = LLM(s, CostMeter(cap_usd=s.max_usd_per_issue - ctx.spent_usd()), ctx.log)
+    spec = spec_review(llm, issue, diff=diff, tests=cand.tests_added, system=_prompt("spec.md"))
+    ctx.log.artifact("spec.json", spec.review.model_dump_json(indent=2))
+    ctx.log.note("verify", f"spec: {spec.label}")
+    ctx.progress.step(f"spec: {spec.label}")
+    return spec
 
 
 def _live_pr(
