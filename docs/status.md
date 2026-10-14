@@ -155,6 +155,22 @@ Same 10 tasks (`--seed 7`, cap $1/task, 40 turns) after `09f44fd` (old tool outp
   600 s suite timeout; results.csv backfilled, so coolamqp now counts as unverified.
 - **Spend 2026-10-14: $5.45** in total ($4.12 before pilot 2 + $1.33).
 
+### 1e. E1 prepared (2026-10-14): 50-task sample, bases checked, sharded runs, generated table
+
+- **Sample:** `evals/swe_rebench/e1/` (50 tasks, seed 7, no gold patch). It contains all 10
+  pilot tasks: `random.sample` draws the same first 10 offsets for n=10 and n=50.
+- **Bases:** `uv run python -m warden.eval.bases evals/swe_rebench/e1 --gold --workers 4` (sandbox
+  only) writes `bases.csv` and `excluded.txt`. `warden eval` never runs excluded tasks;
+  `warden report` lists them apart and does not count them.
+- **Two grading bugs found by the base check, now fixed:** sandbox stdout is cut at 64 KiB
+  (dataspec-30 lost 77 of its 672 P2P results), and fixture files in `test_patch` were passed to
+  pytest ("not found" on a `.yaml`, so the run failed).
+- **Run (one process per shard, k=5; `--budget` applies to each shard, not the total):**
+  `WARDEN_MAX_TOOL_TURNS=40 uv run warden eval --out evals/swe_rebench/e1 --shard i/5 --budget B --max-usd 1 --yes`
+  Each shard writes `results.shard-i.csv`; re-running the same command resumes.
+- **Report:** `uv run warden report evals/swe_rebench/e1/results.shard-*.csv --md --label E1`;
+  add `--write-readme` to replace the table between the README's `results` markers.
+
 ### 1a. Earlier notes: blocked by Token Factory billing (resolved)
 
 `warden run --issue 196 --at 43f3851^ --yes` (run `20261010-111217-7c89`) fetched the issue, then

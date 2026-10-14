@@ -75,6 +75,22 @@ Every entry: date · tool · what happened · numbers · what would have helped.
   from `.wait()` rather than returning an exit code. With (1)–(3) handled, all 10 sampled bases
   grade as expected (F2P fails, 606/606 P2P pass, 4–18 s to prepare).
 
+- 2026-10-14 · runtime · `run()` stdout is silently cut at **65,535 bytes**, with no flag or marker
+  on the result. A `pytest -rA` log for coverahealth__dataspec-30 (672 P2P ids) lost its last 77
+  results, so a correct gold patch graded "not resolved" (P2P 614/672). Workaround: write the log
+  into a kept checkpoint and read it back in 60 kB chunks (672/672). → document the cap, and set a
+  `truncated` field (or return the full stream as an artifact).
+- 2026-10-14 · concurrency · Probe for a sharded eval (5 shards × 3 candidates ≈ 15 forks), each
+  fork `sleep 20` kept on one SWE-rebench base, with 4 base-validation workers running alongside:
+  N=15 → 15/15 ok, latency 21.2–23.2 s; N=25 → 25/25, 21.3–23.1 s; N=40 → 40/40, 21.7–23.7 s;
+  N=60 → 60/60 ok but max 44.9 s (wall 45.6 s): past ~50 in flight, runs **queue silently**
+  instead of erroring. Good behaviour, but invisible: → expose queue position / a 429 with
+  Retry-After so a client can tell queueing from a slow command.
+- 2026-10-14 · eval images · 50-task E1 sample (seed 7) base check, no model calls: 50/50 images
+  present, 13–90 s per task (prepare + base grade + gold grade), parallelism 4. With the two
+  grading fixes in, 49/50 grade as the dataset says (F2P fails on the base, gold resolves). The
+  outlier is pypa__pip-11987, whose F2P test already passes on the unfixed base.
+
 ## Token Factory inference
 
 - 2026-10-04 · A5 · `response_format={"type": "json_schema", "strict": true}` with the `Plan` schema
