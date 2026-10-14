@@ -7,7 +7,9 @@ check is red (a red lint is exactly what the target's CI would reject). PASS_WIT
 only doubt is an inconclusive theater run. Checks the image cannot run are listed in
 `not_verified` and never block. The regression check (existing tests green on base, red on the
 candidate) and the spec review (a behaviour the issue states, quoted, that the diff does not
-implement) add FAIL reasons; their inconclusive or unclear results are concerns. The spec review
+implement) add FAIL reasons; their inconclusive or unclear results are concerns. A regression
+check with no related test to run is `not_verified` *and* a concern (PASS → PASS_WITH_CONCERNS),
+because unlike an unconfigured lint it is a gap in this candidate's evidence. The spec review
 is the one LLM input and it never upgrades a decision. A suite that times out is still FAIL (no
 run showed the new tests passing on the candidate) but marked `inconclusive` when it is the only
 fail reason: the candidate was not verified, which is different from being rejected.
@@ -71,8 +73,14 @@ def decide(
             if gate.ran(check):  # a check the profile does not run is in not_verified instead
                 (passed if ok else fail).append(f"{name} {'clean' if ok else 'red'}")
 
+    not_verified = list(gate.not_verified) if gate else ["gate"]
     if regression is not None:
-        if regression.broken:
+        if not regression.ran:
+            # Not a repo-level gap like an unconfigured lint: this candidate's change went
+            # unchecked against the repo's own tests, the main false-PASS guard. Say so.
+            not_verified.append(f"existing tests ({regression.skipped})")
+            concerns.append(f"existing tests {regression.label}")
+        elif regression.broken:
             fail.append(f"regression: {regression.label} ({', '.join(regression.broken[:5])})")
         elif regression.inconclusive:
             concerns.append(f"regression check {regression.label}")
@@ -105,7 +113,7 @@ def decide(
         ruff_ok=bool(gate and gate.ruff_ok),
         alembic_single_head=bool(gate and gate.alembic_single_head),
         openapi_drift=bool(gate is None or gate.openapi_drift),
-        not_verified=list(gate.not_verified) if gate else ["gate"],
+        not_verified=not_verified,
         concerns=concerns,
         reasons=fail_all + passed if fail_all else passed,
         regressions=list(regression.broken) if regression else [],

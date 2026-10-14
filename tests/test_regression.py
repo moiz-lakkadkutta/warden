@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
 from warden.runlog.events import EventLog
 from warden.sandbox.box import Box
-from warden.verify.regression import regression_check, related_tests
+from warden.verify.regression import content_pattern, regression_check, related_tests, targets
 from warden.verify.tail import TAIL_BYTES
 
 CMD = "pytest -rA -p no:cacheprovider"
@@ -68,11 +69,97 @@ def _rules(cand_out: str, cand_exit: int = 1) -> list[tuple[str, str, str, int]]
 def test_related_tests_ranks_name_matches_first_and_skips_non_python() -> None:
     changed = ["tardis/plugins/telegrafmonitoring.py", "README.md", "tests/test_x.py"]
     hits = ["tests/test_utils.py", "tests/plugins_t/test_telegrafmonitoring.py", "docs/x.py"]
-    assert related_tests(changed, hits, cap=8) == [
+    assert related_tests(changed, [], hits, cap=8) == [
         "tests/plugins_t/test_telegrafmonitoring.py",
         "tests/test_utils.py",
     ]
-    assert related_tests(changed, hits, cap=1) == ["tests/plugins_t/test_telegrafmonitoring.py"]
+    assert related_tests(changed, [], hits, cap=1) == ["tests/plugins_t/test_telegrafmonitoring.py"]
+
+
+# SWE-rebench SpikeInterface__spikeinterface-2775 (pilot 3): the test file only says
+# `CurationSorting`, so a case-sensitive content grep for `curationsorting` never selected it.
+SI_SRC = "src/spikeinterface/curation/curationsorting.py"
+SI_TEST = "src/spikeinterface/curation/tests/test_curationsorting.py"
+SI_TESTS = [
+    "src/spikeinterface/core/tests/test_basesorting.py",
+    "src/spikeinterface/curation/tests/test_auto_merge.py",
+    SI_TEST,
+    "src/spikeinterface/curation/tests/test_mergeunitssorting.py",
+]
+
+
+def test_a_test_file_named_after_the_module_is_selected_without_any_content_hit() -> None:
+    assert related_tests([SI_SRC], SI_TESTS, [], cap=8) == [SI_TEST]
+
+
+def test_filename_matches_rank_before_content_matches() -> None:
+    hits = ["src/spikeinterface/curation/tests/test_auto_merge.py", SI_TEST]
+    assert related_tests([SI_SRC], SI_TESTS, hits, cap=8) == [
+        SI_TEST,
+        "src/spikeinterface/curation/tests/test_auto_merge.py",
+    ]
+    assert related_tests([SI_SRC], SI_TESTS, hits, cap=1) == [SI_TEST]
+
+
+def test_other_filename_shapes_match() -> None:
+    tests = ["tests/curationsorting_test.py", "tests/curationsorting/test_split.py", "tests/a.py"]
+    assert related_tests([SI_SRC], tests, [], cap=8) == tests[:2]
+
+
+def test_content_is_searched_case_insensitively_and_by_dotted_module_path() -> None:
+    pattern = content_pattern(targets([SI_SRC]))
+    assert "curationsorting" in pattern
+    assert r"spikeinterface\.curation\.curationsorting" in pattern
+    assert re.search(pattern, "from spikeinterface.curation import CurationSorting", re.I)
+
+
+def test_init_uses_the_package_name() -> None:
+    (t,) = targets(["pkg/curation/__init__.py"])
+    assert t.stem == "curation" and t.module == "pkg.curation" and not t.generic
+    tests = ["pkg/tests/test_curation.py", "pkg/tests/test_other.py"]
+    assert related_tests(["pkg/curation/__init__.py"], tests, [], cap=8) == tests[:1]
+    # a top-level package's __init__ is imported by everything: name match only, no content term
+    (top,) = targets(["pkg/__init__.py"])
+    assert top.generic and content_pattern([top]) == ""
+
+
+def test_generic_stems_match_by_name_or_dotted_path_never_by_bare_word() -> None:
+    changed = ["src/pkg/utils.py"]
+    (t,) = targets(changed)
+    assert t.generic and t.module == "pkg.utils"
+    pattern = content_pattern([t])
+    assert re.search(pattern, "from pkg.utils import x", re.I)
+    assert not re.search(pattern, "from other import utils", re.I)
+    tests = [f"tests/utils/test_{i}.py" for i in range(50)] + ["tests/test_utils.py"]
+    # a `tests/utils/` directory is not evidence for a generic stem; the exact name is
+    assert related_tests(changed, tests, [], cap=8) == ["tests/test_utils.py"]
+    (short,) = targets(["pkg/io.py"])
+    assert short.generic
+
+
+def test_selection_is_capped() -> None:
+    hits = [f"tests/test_{i}.py" for i in range(30)]
+    assert len(related_tests([SI_SRC], SI_TESTS, hits, cap=8)) == 8
+
+
+def test_spikeinterface_layout_end_to_end_with_dash_safe_commands(tmp_path: Path) -> None:
+    out = f"PASSED {SI_TEST}::test_curation\n"
+    rules = [
+        ("cand", "git diff --name-only", f"{SI_SRC}\n", 0),
+        ("base", "git ls-files", "\n".join(SI_TESTS) + "\n", 0),
+        ("base", "git grep", "", 1),  # nothing mentions the lower-case stem
+        ("base", "cat ", "def test_curation(): ...\n", 0),
+        ("base", "pytest", out, 0),
+        ("cand+t", "pytest", out, 0),
+    ]
+    stub = ShellStub(rules)
+    base, cand = _boxes(tmp_path, stub)
+    res = regression_check(base, cand, test_cmd=CMD, cwd="/testbed")
+    assert res.ran and res.files == (SI_TEST,) and res.broken == []
+    grep = next(r["shell"] for r in stub.runs if "git grep" in r["shell"])
+    assert " -i " in grep and " -l " in grep
+    for r in stub.runs:  # POSIX sh (dash) in the sandbox: no bash-isms
+        assert not any(b in r["shell"] for b in ("[[", "<(", "{a,", "shopt", "**"))
 
 
 def test_a_test_green_on_base_and_red_on_candidate_is_a_regression(tmp_path: Path) -> None:
@@ -145,7 +232,22 @@ def res_runs(box: Box) -> list[dict[str, Any]]:
     return box._b.runs  # type: ignore[attr-defined,no-any-return]
 
 
-def test_no_related_tests_means_not_run(tmp_path: Path) -> None:
+def test_no_changed_module_is_an_explicit_not_run(tmp_path: Path) -> None:
     rules = [("cand", "git diff --name-only", "README.md\n", 0)]
     base, cand = _boxes(tmp_path, ShellStub(rules))
-    assert regression_check(base, cand, test_cmd=CMD, cwd="/testbed") is None
+    res = regression_check(base, cand, test_cmd=CMD, cwd="/testbed")
+    assert not res.ran and res.files == () and res.broken == []
+    assert res.label.startswith("not run: ")
+
+
+def test_no_related_test_file_is_an_explicit_not_run(tmp_path: Path) -> None:
+    rules = [
+        ("cand", "git diff --name-only", "pkg/frobnicate.py\n", 0),
+        ("base", "git ls-files", "tests/test_other.py\n", 0),
+        ("base", "git grep", "", 1),
+    ]
+    stub = ShellStub(rules)
+    base, cand = _boxes(tmp_path, stub)
+    res = regression_check(base, cand, test_cmd=CMD, cwd="/testbed")
+    assert not res.ran and "frobnicate" in res.skipped
+    assert not any("pytest" in r["shell"] for r in stub.runs)

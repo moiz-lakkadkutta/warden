@@ -131,6 +131,15 @@ def test_clean_regression_is_a_pass_reason() -> None:
     assert v.decision == "PASS" and any("stay green" in r for r in v.reasons)
 
 
+def test_regression_not_run_is_not_verified_and_a_concern_never_green() -> None:
+    skipped = RegressionResult.not_run("no existing test file names or mentions curationsorting")
+    v = decide(_cand(), _theater(), _green(), regression=skipped)
+    assert v.decision == "PASS_WITH_CONCERNS"
+    assert any("curationsorting" in n for n in v.not_verified)
+    assert "fe codegen" in v.not_verified
+    assert not any(r.startswith(("existing tests: ", "regression: ")) for r in v.reasons)
+
+
 def test_an_unmet_stated_behaviour_fails_and_unclear_is_a_concern() -> None:
     v = decide(_cand(), _theater(), _green(), spec=_spec(unmet=["keeps num_steps"]))
     assert v.decision == "FAIL" and v.spec_unmet == ["keeps num_steps"]

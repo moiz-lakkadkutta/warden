@@ -741,12 +741,9 @@ def verify_candidate(
         regression = regression_check(
             base, candidate, test_cmd=regression_cmd, cwd=s.workdir, wrap=s.shell_wrap, timeout=600
         )
-        label = (
-            regression.label if regression else "not run (no existing test names a changed module)"
-        )
-        ctx.log.note("verify", f"regression: {label}")
-        ctx.progress.step(f"regression: {label}")
-        if regression is not None:
+        ctx.log.note("verify", f"regression: {regression.label}")
+        ctx.progress.step(f"regression: {regression.label}")
+        if regression.ran:
             ctx.log.artifact(
                 "regression.txt", f"files: {' '.join(regression.files)}\n\n{regression.output}"
             )
