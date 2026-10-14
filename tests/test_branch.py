@@ -167,3 +167,40 @@ def test_export_patch_without_changes_raises(tmp_path: Path) -> None:
     box = Box(_GitBox("", code=1), "cand", EventLog(tmp_path / "runs", "t"))
     with pytest.raises(NoChangesError):
         export_patch(box, cwd="/src", issue=1, title="t")
+
+
+def test_push_url_sends_the_fix_branch_to_the_fork_only(
+    origin: tuple[Path, str, str], tmp_path: Path
+) -> None:
+    bare, _, c2 = origin
+    fork = tmp_path / "fork.git"
+    subprocess.run(["git", "clone", "-q", "--bare", str(bare), str(fork)], check=True)
+    git(bare, "branch", "-m", "main", "trunk")  # a non-main default branch
+    patch = _patch_against(bare, c2, tmp_path)
+    pushed = push_fix_branch(
+        "up/stream",
+        patch,
+        issue=1928,
+        run_id="r9",
+        base_rev=None,
+        cache_dir=tmp_path / "cache",
+        remote_url=str(bare),
+        push_url=str(fork),
+        base_branch="trunk",
+    )
+    assert pushed.base == "trunk" and pushed.head == "warden/fix-1928-r9"
+    assert git(fork, "rev-parse", f"{pushed.head}^") == c2
+    assert "warden/fix-1928-r9" not in git(bare, "branch", "--list")  # upstream untouched
+
+
+def test_replay_through_a_fork_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="push access"):
+        push_fix_branch(
+            "up/stream",
+            "From x\n",
+            issue=1,
+            run_id="r",
+            base_rev="abc",
+            cache_dir=tmp_path / "cache",
+            push_url="https://github.com/me/stream.git",
+        )

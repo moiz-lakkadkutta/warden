@@ -1,0 +1,11 @@
+task_id,resolved,verdict,false_pass,false_fail,unverified,theater_catch,tool_turns,usd,seconds,error
+MatterMiners__tardis-77,0,FAIL,0,0,0,0,40,0.1038,416,
+PennyLaneAI__pennylane-5831,0,FAIL,0,0,0,0,40,0.1541,204,
+SpikeInterface__spikeinterface-2775,0,PASS,1,0,0,0,10,0.0739,232,
+astropy__photutils-1956,0,FAIL,0,0,0,0,40,0.3520,350,
+gmr__pamqp-52,1,FAIL,0,1,0,0,40,0.3228,370,
+iossifovlab__gpf-446,0,FAIL,0,0,0,0,40,0.2208,341,
+joshuadavidthomas__django-bird-58,0,FAIL,0,0,0,0,10,0.0372,160,
+planetlabs__planet-client-python-978,0,FAIL,0,0,0,0,38,0.2599,354,
+python-wheel-build__fromager-352,0,FAIL,0,0,0,0,40,0.1401,218,
+smok-serwis__coolamqp-28,0,ERROR,0,0,0,0,0,0.1172,1823,"ApiStatusCodeError: ApiStatusCodeError(request=RequestInfo(url='https://api.tokenfactory.nebius.com/sandboxes/v1/operations/01a13a9d-09e4-7221-a95d-cbd43a24f418', method='GET'), response=ResponseInfo(headers={'date': 'We"

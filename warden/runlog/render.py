@@ -9,9 +9,11 @@ a per-phase log and a footer with the resume command. Everything here is pure ex
 from __future__ import annotations
 
 import html
+import json
 import re
 from collections import defaultdict
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +41,8 @@ VERDICT_COLOURS: dict[str, str] = {
 THEATER_AS_REQUIRED = "failed on unfixed base — as required"
 THEATER_IS_THEATER = "passed on unfixed base — tests are theater"
 NOT_RUN = "not run"
+# `pytest` as a command word: not `mypytest`, not `pytest.ini`, not `pytest-cov`
+_PYTEST_RE = re.compile(r"(^|[\s;&|'\"(/])pytest(?![\w.-])")
 
 
 # --- branch tree -----------------------------------------------------------------------------
@@ -71,15 +75,32 @@ class BranchTree:
     theater: str | None
     edges: tuple[Edge, ...]
     runs: tuple[NodeRun, ...]
+    execs: tuple[NodeRun, ...] = ()  # every command, edges included, in event order
 
     def children(self, node: str) -> list[str]:
         return [e.child for e in self.edges if e.parent == node]
 
+    def subtree(self, node: str) -> set[str]:
+        """`node` and every checkpoint forked (transitively) from it."""
+        out, todo = {node}, [node]
+        while todo:
+            for child in self.children(todo.pop()):
+                if child not in out:
+                    out.add(child)
+                    todo.append(child)
+        return out
+
     def test_run(self, node: str) -> NodeRun | None:
-        """Last run on `node` whose command is a pytest invocation."""
+        """Last pytest invocation on `node` or a checkpoint below it, in event order.
+
+        Live runs wrap the command (`with-services sh -c 'cd backend && pytest …'`) and the
+        theater probe runs on a child of its checkout node, so neither prefix nor exact node
+        matching is enough.
+        """
+        nodes = self.subtree(node)
         hit = None
-        for r in self.runs:
-            if r.node == node and r.shell.startswith("pytest"):
+        for r in self.execs or self.runs:
+            if r.node in nodes and _PYTEST_RE.search(r.shell):
                 hit = r
         return hit
 
@@ -97,6 +118,7 @@ class BranchTree:
 def build_tree(events: list[RunEvent]) -> BranchTree:
     edges: list[Edge] = []
     runs: list[NodeRun] = []
+    execs: list[NodeRun] = []
     for ev in events:
         if ev.kind != "sandbox":
             continue
@@ -107,6 +129,7 @@ def build_tree(events: list[RunEvent]) -> BranchTree:
         code = _int(d.get("exit_code"))
         ms = ev.ms or 0
         tag = d.get("candidate")
+        execs.append(NodeRun(frm, ev.phase, shell, code, ms))
         if to and to != frm:
             cand = tag if isinstance(tag, int) else None
             edges.append(Edge(frm, to, ev.phase, shell, code, ms, cand))
@@ -120,7 +143,7 @@ def build_tree(events: list[RunEvent]) -> BranchTree:
         (e.child for e in edges if e.phase == "verify" and base is not None and e.parent == base),
         None,
     )
-    return BranchTree(base, candidate, theater, tuple(edges), tuple(runs))
+    return BranchTree(base, candidate, theater, tuple(edges), tuple(runs), tuple(execs))
 
 
 def _int(v: Any) -> int:
@@ -272,7 +295,8 @@ def _css() -> str:
         ".node{flex:0 0 auto;min-width:160px;padding:12px 14px;border:1px solid var(--line);"
         "border-radius:6px;background:var(--card);align-self:center}"
         ".label{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}"
-        ".id{font-family:var(--mono);font-size:13px}"
+        ".id{font-family:var(--mono);font-size:13px;overflow-wrap:anywhere}"
+        ".edge .mono{overflow-wrap:anywhere}"
         ".branches{flex:1 1 auto;display:flex;flex-direction:column;gap:12px;min-width:0;"
         "position:relative;padding-left:24px}"
         ".branches::before{content:'';position:absolute;left:0;top:12%;bottom:12%;"
@@ -295,7 +319,15 @@ def _css() -> str:
         "details{margin:8px 0;border-left:3px solid var(--line);padding-left:12px}"
         "summary{cursor:pointer;font-weight:600}summary .num{font-weight:400;color:var(--muted)}"
         ".ev{font-family:var(--mono);font-size:13px;margin:4px 0;color:var(--muted);"
-        "word-break:break-word}.ev.err,.ev.cap{color:var(--bad)}"
+        "word-break:break-word}.ev.err,.ev.cap{color:var(--bad)}.ev.warn{color:var(--warn)}"
+        ".ev .t{color:var(--none)}"
+        ".subtitle{width:100%;margin:0;color:var(--muted)}"
+        "#verifier ul{margin:4px 0 8px;padding-left:20px}#verifier li{margin:2px 0}"
+        ".runs td.issue{font-family:var(--sans);font-size:14px}.runs td.num{white-space:nowrap}"
+        ".runs .pill{font-size:11px;margin-top:4px;white-space:nowrap}"
+        ".empty{padding:24px;border:1px dashed var(--line);border-radius:6px;"
+        "color:var(--muted)}"
+        ".gif{max-width:100%;height:auto;border-radius:6px;border:1px solid var(--line)}"
         "#footer{margin-top:32px;padding-top:12px;border-top:1px solid var(--line);"
         "color:var(--muted);font-size:13px;display:flex;flex-wrap:wrap;gap:8px 16px}"
         "@media (max-width:600px){#tree{flex-direction:column}}"
@@ -312,6 +344,7 @@ def _header(
     events: list[RunEvent],
     result: dict[str, Any] | None,
     rows: list[tuple[str, str]],
+    title: str | None = None,
 ) -> str:
     label = verdict_label(events, result, rows)
     if result and result.get("cost_usd") is not None:
@@ -331,13 +364,16 @@ def _header(
         else f'<span class="chip">{_e(m)}</span>'
         for m in _models(events, rows)
     )
+    pr_url = str(result.get("pr_url") or "") if result else ""
+    pr = f'<a class="num" href="{_e(pr_url)}">PR ↗</a>' if pr_url.startswith("https://") else ""
+    subtitle = f'<p class="subtitle">{_e(title)}</p>' if title else ""
     return (
         '<header id="header">'
         f"<h1>warden · run <span class='mono'>{_e(run_id)}</span></h1>"
         f'<span class="pill" data-verdict="{_e(label)}">{_e(label)}</span>'
         f'<span class="meta">{issue}<span class="num">${total:.2f}</span>'
-        f'<span class="num">{_e(wall)}</span>{chips}</span>'
-        "</header>"
+        f'<span class="num">{_e(wall)}</span>{chips}{pr}</span>'
+        f"{subtitle}</header>"
     )
 
 
@@ -484,38 +520,92 @@ def _evidence(verdict: str | None, rows: list[tuple[str, str]]) -> str:
     )
 
 
-def _log_row(ev: RunEvent) -> str:
-    row = _log_row_body(ev)
-    k = ev.data.get("candidate")
-    if isinstance(k, int):  # best-of-N: say which candidate's branch this line is on
-        return row.replace("<div class='ev", f"<div data-candidate='{k}' class='ev", 1).replace(
-            "'>", f"'><span class='num'>#{k}</span> ", 1
-        )
-    return row
+def _short(v: Any) -> str:
+    """Checkpoint ids are UUIDs in live runs: 8 characters are enough to tell them apart."""
+    s = str(v or "")
+    return s[:8] if len(s) > 12 else s
 
 
-def _log_row_body(ev: RunEvent) -> str:
+def _clip(s: str, n: int) -> str:
+    s = " ".join(s.split())
+    return s if len(s) <= n else s[: n - 1] + "…"
+
+
+def _summary(v: Any) -> str:
+    if isinstance(v, dict):
+        return ", ".join(f"{k}={_summary(x)}" for k, x in v.items())
+    if isinstance(v, list):
+        if len(v) > 3 and not all(isinstance(x, str) for x in v):
+            return f"[{len(v)} items]"
+        return " ".join(_summary(x) for x in v)
+    return str(v)
+
+
+def event_text(ev: RunEvent) -> str:
+    """One plain-text line per event; the console log and the timeline GIF both use it."""
     d = ev.data
     if ev.kind == "sandbox":
+        frm, to = d.get("from"), d.get("to")
+        hop = f"{_short(frm)} → {_short(to)}" if to and to != frm else _short(frm)
         return (
-            f"<div class='ev'>⎇ {_e(d.get('from', ''))} → {_e(d.get('to', ''))} · "
-            f"<code>{_e(d.get('shell', ''))}</code> → exit {_int(d.get('exit_code'))} · "
-            f"{_fmt_ms(ev.ms or 0)}</div>"
+            f"sandbox {hop} · {_clip(str(d.get('shell', '')), 140)} → exit "
+            f"{_int(d.get('exit_code'))} · {_fmt_ms(ev.ms or 0)}"
         )
     if ev.kind == "llm":
+        model = str(d.get("model", "")).split("/")[-1]
         return (
-            f"<div class='ev'>◎ {_e(d.get('role', ''))} {_e(d.get('model', ''))} · "
-            f"{_int(d.get('prompt_tokens'))}+{_int(d.get('completion_tokens'))} tok · "
-            f"${ev.usd or 0:.4f}</div>"
+            f"llm {d.get('role', '')} · {model} · {_int(d.get('prompt_tokens'))}+"
+            f"{_int(d.get('completion_tokens'))} tok · ${ev.usd or 0:.4f} · {_fmt_ms(ev.ms or 0)}"
         )
+    if ev.kind == "tool":
+        name = str(d.get("name", "tool"))
+        if "query" in d:
+            n = len(d.get("urls") or [])
+            return f'{name} "{_clip(str(d["query"]), 100)}" → {n} url{"" if n == 1 else "s"}'
+        out = f"{name}({_clip(_summary(d.get('args', '')), 120)})"
+        if d.get("exit_code") is not None:
+            out += f" → exit {_int(d.get('exit_code'))}"
+        if d.get("ok") is False:
+            out += f" · {_clip(str(d.get('error') or 'failed'), 80)}"
+        return out
     if ev.kind == "cost_cap":
         return (
-            f"<div class='ev cap'>■ cost cap ${float(d.get('cap_usd', 0)):.2f} reached "
-            f"(spent ${float(d.get('spent_usd', 0)):.2f})</div>"
+            f"cost cap ${float(d.get('cap_usd', 0)):.2f} reached "
+            f"(spent ${float(d.get('spent_usd', 0)):.2f})"
         )
     if ev.kind == "error":
-        return f"<div class='ev err'>✕ {_e(d.get('text', d))}</div>"
-    return f"<div class='ev'>· {_e(d.get('text', ev.kind))}</div>"
+        return _clip(str(d.get("text") or d.get("error") or d), 200)
+    if "text" in d:
+        return _clip(str(d["text"]), 200)
+    return _clip(_summary(d), 160) or ev.kind
+
+
+_GLYPH = {"sandbox": "⎇", "llm": "◎", "tool": "▸", "cost_cap": "■", "error": "✕", "note": "·"}
+
+
+def _clock(ms: int) -> str:
+    s = max(0, ms) // 1000
+    h, rem = divmod(s, 3600)
+    m, s = divmod(rem, 60)
+    return f"+{h}:{m:02d}:{s:02d}" if h else f"+{m:02d}:{s:02d}"
+
+
+def _log_row(ev: RunEvent, t0: datetime | None = None) -> str:
+    cls = {"cost_cap": "ev cap", "error": "ev err"}.get(ev.kind, "ev")
+    if ev.kind == "tool" and ev.data.get("ok") is False:
+        cls = "ev warn"
+    at = (
+        f"<span class='t'>{_clock(int((ev.ts - t0).total_seconds() * 1000))}</span> "
+        if t0 is not None
+        else ""
+    )
+    k = ev.data.get("candidate")
+    if isinstance(k, int):  # best-of-N: say which candidate's branch this line is on
+        return (
+            f"<div data-candidate='{k}' class='{cls}'>{at}<span class='num'>#{k}</span> "
+            f"{_GLYPH.get(ev.kind, '·')} {_e(event_text(ev))}</div>"
+        )
+    return f"<div class='{cls}'>{at}{_GLYPH.get(ev.kind, '·')} {_e(event_text(ev))}</div>"
 
 
 def _log(events: list[RunEvent]) -> str:
@@ -523,6 +613,7 @@ def _log(events: list[RunEvent]) -> str:
     for ev in events:
         by_phase[ev.phase].append(ev)
     durs = phase_durations_ms(events)
+    t0 = events[0].ts if events else None
     parts = ['<section id="log">']
     for p in PHASES:
         evs = by_phase.get(p, [])
@@ -533,7 +624,7 @@ def _log(events: list[RunEvent]) -> str:
             f"<summary>{p} <span class='num'>{len(evs)} events · {_fmt_ms(durs[p])} · "
             f"${usd:.2f}</span></summary>"
         )
-        parts.extend(_log_row(ev) for ev in evs)
+        parts.extend(_log_row(ev, t0) for ev in evs)
         if not evs:
             parts.append("<div class='ev'>· no events</div>")
         parts.append("</details>")
@@ -541,16 +632,46 @@ def _log(events: list[RunEvent]) -> str:
     return "".join(parts)
 
 
-def _footer(run_id: str) -> str:
-    return (
-        '<footer id="footer">'
-        f"<span class='mono'>{_e(run_id)}</span>"
-        f"<code>warden resume {_e(run_id)}</code>"
-        '<a href="events.jsonl">events.jsonl</a>'
-        '<a href="cost.jsonl">cost.jsonl</a>'
-        '<a href="artifacts/pr_body.md">pr_body.md</a>'
-        "</footer>"
+def _verifier(verdict: dict[str, Any] | None) -> str:
+    """The verifier's own reasons (artifacts/verdict.json): what it checked and what it could not."""
+    if not verdict:
+        return ""
+    groups = (
+        ("Reasons", "reasons"),
+        ("Concerns", "concerns"),
+        ("Regressions", "regressions"),
+        ("Issue behaviours not implemented", "spec_unmet"),
+        ("Not verified", "not_verified"),
     )
+    parts = ['<h2>Verifier</h2><section id="verifier">']
+    decision = verdict.get("decision")
+    if decision:
+        parts.append(f"<p>Decision: <strong>{_e(str(decision).replace('_', ' '))}</strong></p>")
+    for label, key in groups:
+        items = [str(x) for x in verdict.get(key) or []]
+        if items:
+            lis = "".join(f"<li>{_e(_clip(x, 300))}</li>" for x in items)
+            parts.append(f'<div class="label">{label}</div><ul>{lis}</ul>')
+    parts.append("</section>")
+    return "".join(parts)
+
+
+def _footer(
+    run_id: str, *, has_pr_body: bool = True, has_gif: bool = False, index_href: str | None = None
+) -> str:
+    links = [
+        f"<span class='mono'>{_e(run_id)}</span>",
+        f"<code>warden resume {_e(run_id)}</code>",
+        '<a href="events.jsonl">events.jsonl</a>',
+        '<a href="cost.jsonl">cost.jsonl</a>',
+    ]
+    if has_pr_body:
+        links.append('<a href="artifacts/pr_body.md">pr_body.md</a>')
+    if has_gif:
+        links.append('<a href="timeline.gif">timeline.gif</a>')
+    if index_href:
+        links.append(f'<a href="{_e(index_href)}">all runs</a>')
+    return f'<footer id="footer">{"".join(links)}</footer>'
 
 
 def render_html(
@@ -558,33 +679,97 @@ def render_html(
     events: list[RunEvent],
     result: dict[str, Any] | None,
     evidence_md: str | None,
+    *,
+    title: str | None = None,
+    verdict: dict[str, Any] | None = None,
+    has_gif: bool = False,
+    index_href: str | None = None,
 ) -> str:
-    verdict, rows = parse_evidence(evidence_md or "")
+    md_verdict, rows = parse_evidence(evidence_md or "")
     parts = [
         "<!doctype html><html lang='en'><head><meta charset='utf-8'>",
         "<meta name='viewport' content='width=device-width,initial-scale=1'>",
+        "<meta name='color-scheme' content='light dark'><link rel='icon' href='data:,'>",
         f"<title>warden run {_e(run_id)}</title>",
         _css(),
         "</head><body>",
-        _header(run_id, events, result, rows),
+        _header(run_id, events, result, rows, title),
         _timeline(events),
         "<h2>Branch tree</h2>",
         _tree(events, rows),
         "<h2>Evidence</h2>",
-        _evidence(verdict, rows),
+        _evidence(md_verdict, rows),
+        _verifier(verdict),
         "<h2>Log</h2>",
         _log(events),
-        _footer(run_id),
+        _footer(
+            run_id,
+            has_pr_body=evidence_md is not None,
+            has_gif=has_gif,
+            index_href=index_href,
+        ),
         "</body></html>",
     ]
     return "\n".join(parts)
 
 
-def render_run(runs_dir: Path, run_id: str) -> Path:
-    events = EventLog.read(runs_dir, run_id)
-    result = EventLog.read_result(runs_dir, run_id)
-    pr_body = runs_dir / run_id / "artifacts" / "pr_body.md"
-    evidence_md = pr_body.read_text(encoding="utf-8") if pr_body.exists() else None
+@dataclass(frozen=True)
+class RunView:
+    """Everything the console reads from runs/<id>/ (missing files are None)."""
+
+    run_id: str
+    events: list[RunEvent]
+    result: dict[str, Any] | None
+    evidence_md: str | None
+    title: str | None
+    verdict: dict[str, Any] | None
+    mode: str | None = None  # run.json: "demo" (fake sandbox) or "live"
+
+    @property
+    def label(self) -> str:
+        return verdict_label(self.events, self.result, parse_evidence(self.evidence_md or "")[1])
+
+
+def _json_file(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def load_run(runs_dir: Path, run_id: str) -> RunView:
+    art = runs_dir / run_id / "artifacts"
+    pr_body = art / "pr_body.md"
+    issue = _json_file(art / "issue.json") or {}
+    title = str(issue["title"]) if issue.get("title") else None
+    return RunView(
+        run_id=run_id,
+        events=EventLog.read(runs_dir, run_id),
+        result=EventLog.read_result(runs_dir, run_id),
+        evidence_md=pr_body.read_text(encoding="utf-8") if pr_body.exists() else None,
+        title=title,
+        verdict=_json_file(art / "verdict.json"),
+        mode=str((_json_file(runs_dir / run_id / "run.json") or {}).get("mode") or "") or None,
+    )
+
+
+def render_view(view: RunView, *, has_gif: bool = False, index_href: str | None = None) -> str:
+    return render_html(
+        view.run_id,
+        view.events,
+        view.result,
+        view.evidence_md,
+        title=view.title,
+        verdict=view.verdict,
+        has_gif=has_gif,
+        index_href=index_href,
+    )
+
+
+def render_run(runs_dir: Path, run_id: str, *, has_gif: bool = False) -> Path:
     out = runs_dir / run_id / "index.html"
-    out.write_text(render_html(run_id, events, result, evidence_md), encoding="utf-8")
+    out.write_text(render_view(load_run(runs_dir, run_id), has_gif=has_gif), encoding="utf-8")
     return out

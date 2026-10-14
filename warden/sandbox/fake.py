@@ -13,6 +13,10 @@ import shlex
 from dataclasses import dataclass, field
 from typing import Any
 
+_KEEP_TAIL = re.compile(
+    r"(?P<cmd>.+) > (?P<log>\S+) 2>&1; rc=\$\?; tail -c (?P<n>\d+) (?P=log); exit \$rc", re.S
+)
+
 
 @dataclass
 class FakeImage:
@@ -73,6 +77,10 @@ class FakeBackend:
         return stdout, stderr, code, (child if keep else None), child.uuid
 
     def _interpret(self, img: FakeImage, shell: str, cwd: str) -> tuple[str, str, int]:
+        tail = _KEEP_TAIL.fullmatch(shell)  # verify/tail.py: `cmd > log 2>&1; …; tail -c N log`
+        if tail:
+            out, err, code = self._interpret(img, tail["cmd"], cwd)
+            return (out + err)[-int(tail["n"]) :], "", code
         try:
             parts = shlex.split(shell) if shell else []
         except ValueError:

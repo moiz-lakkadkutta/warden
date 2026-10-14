@@ -7,7 +7,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from warden.config import Role
-from warden.hunt.issue import IssueText
+from warden.hunt.issue import UNTRUSTED_RULE, IssueText
 from warden.schemas import SpecBehaviour, SpecReview
 from warden.verify.spec import spec_review
 
@@ -45,8 +45,10 @@ def test_met_behaviours_are_clean_and_the_call_is_a_verdict_call() -> None:
     )
     assert res.unmet == [] and res.unclear == []
     role, phase, system, user = llm.calls[0]
-    assert role is Role.VERDICT and phase == "verify" and system == "SYS"
+    assert role is Role.VERDICT and phase == "verify" and system.startswith("SYS\n")
+    assert UNTRUSTED_RULE in system  # the issue is data, never instructions
     assert "num_steps=self.num_steps" in user and "t::a" in user and ISSUE.title in user
+    assert user.index("<untrusted-issue>") < user.index(ISSUE.title) < user.index("</untrusted")
 
 
 def test_an_unmet_behaviour_quoted_from_the_issue_blocks() -> None:

@@ -5,16 +5,24 @@ with the pydantic models in `warden.schemas`, executes ONLY through `Box` (`run`
 hands back a `ToolResult` carrying the checkpoint to continue from (a child after write_file /
 run_shell, the input Box for reads and for every failure). Model mistakes (unknown tool, bad args)
 never raise — they come back as `ok=False` with a retry-able message; backend exceptions propagate.
+
+Arguments are tolerated before they are validated (`tolerate_args`): Nemotron Super invents keys
+and sends integers as strings, and each rejection burned a whole turn (9 of 25 on icalendar#1928).
+Unknown keys are dropped, known aliases renamed, numeric strings coerced, out-of-range integers
+clamped and nulls for defaulted keys removed; every repair is recorded on the `tool` event. A
+missing or empty required argument is still an error.
 """
 
 from __future__ import annotations
 
+import re
 import shlex
 import time
 from dataclasses import dataclass
 from typing import Any
 
-from pydantic import ValidationError
+from annotated_types import Ge, Le
+from pydantic import BaseModel, ValidationError
 
 from warden.runlog.events import EventLog
 from warden.sandbox.box import Box, RunResult
@@ -105,6 +113,9 @@ class ToolResult:
     box: Box  # child after write_file / run_shell; the input Box otherwise or on failure
     ms: int
     truncated: bool
+    # read_file only: the 1-based lines shown (first, last) and the file's line count
+    lines: tuple[int, int] | None = None
+    total_lines: int | None = None
 
 
 def truncate(text: str, limit: int = 8000) -> tuple[str, bool]:
@@ -122,10 +133,16 @@ def page_lines(text: str, start_line: int, limit: int) -> tuple[str | None, bool
     """Whole lines from `start_line` up to `limit` chars, plus a continue hint when cut.
     Unlike `truncate` this never drops the middle: a model rewriting a whole file must see all
     of it. `None` when start_line is past the end. A single over-long line is cut by chars."""
+    page, cut, _ = _paginate(text, start_line, limit)
+    return page, cut
+
+
+def _paginate(text: str, start_line: int, limit: int) -> tuple[str | None, bool, int]:
+    """`page_lines` plus the number of the last line shown."""
     lines = text.splitlines(keepends=True)
     total = len(lines)
     if start_line > max(total, 1):
-        return None, False
+        return None, False, 0
     out: list[str] = []
     size = 0
     for line in lines[start_line - 1 :]:
@@ -135,13 +152,13 @@ def page_lines(text: str, start_line: int, limit: int) -> tuple[str | None, bool
         size += len(out[-1])
     end = start_line - 1 + len(out)
     if end >= total:
-        return "".join(out), False
+        return "".join(out), False, end
     hint = (
         f"…[lines {start_line}-{end} of {total} shown; call read_file with "
         f"start_line={end + 1} for the rest]"
     )
     body = "".join(out)
-    return f"{body if body.endswith(chr(10)) else body + chr(10)}{hint}", True
+    return f"{body if body.endswith(chr(10)) else body + chr(10)}{hint}", True, end
 
 
 def as_message(result: ToolResult, tool_call_id: str) -> dict[str, Any]:
@@ -177,6 +194,101 @@ def scrub_args(args: Any) -> dict[str, Any]:
         else:
             out[k] = repr(value)[:_ARG_MAX]
     return out
+
+
+# Names Nemotron reaches for instead of the declared ones; applied only when the declared key is
+# absent, so a call that sends both keeps the declared value and the alias is ignored.
+_ALIASES: dict[str, str] = {
+    "file": "path",
+    "file_path": "path",
+    "filepath": "path",
+    "filename": "path",
+    "dir": "path",
+    "directory": "path",
+    "start": "start_line",
+    "line": "start_line",
+    "from_line": "start_line",
+    "end": "end_line",
+    "to_line": "end_line",
+    "regex": "pattern",
+    "query": "pattern",
+    "cmd": "command",
+    "contents": "content",
+    "text": "content",
+}
+_INT_STR = re.compile(r"^\s*[+-]?\d+(?:\.0*)?\s*$")
+
+
+@dataclass(frozen=True)
+class Tolerated:
+    """`args` repaired for validation, with what was changed (for the tool event)."""
+
+    args: Any
+    ignored: dict[str, Any]  # unknown keys dropped, with their raw values
+    repaired: list[str]  # short notes: aliases, coercions, clamps, dropped nulls
+
+
+def _int_field(model: type[BaseModel], key: str) -> bool:
+    ann = model.model_fields[key].annotation
+    return ann is int or ann == (int | None)
+
+
+def _bounds(model: type[BaseModel], key: str) -> tuple[int | None, int | None]:
+    lo: int | None = None
+    hi: int | None = None
+    for meta in model.model_fields[key].metadata:
+        if isinstance(meta, Ge) and isinstance(meta.ge, int):
+            lo = meta.ge
+        elif isinstance(meta, Le) and isinstance(meta.le, int):
+            hi = meta.le
+    return lo, hi
+
+
+def tolerate_args(name: str, args: Any) -> Tolerated:
+    """Repair a tool call's arguments before strict validation; never raises. A non-dict or an
+    unknown tool passes through untouched (validation reports it). Required keys stay strict:
+    nothing here invents a missing `path`, `content` or `command`."""
+    model = _ARGS.get(name)
+    if model is None or not isinstance(args, dict):
+        return Tolerated(args, {}, [])
+    fields = model.model_fields
+    out: dict[str, Any] = {str(k): v for k, v in args.items() if str(k) in fields}
+    ignored: dict[str, Any] = {}
+    repaired: list[str] = []
+    for key, value in args.items():
+        k = str(key)
+        if k in fields:
+            continue
+        target = _ALIASES.get(k)
+        if target is not None and target in fields and target not in out:
+            out[target] = value
+            repaired.append(f"{k}→{target}")
+        else:
+            ignored[k] = value
+    for key in list(out):
+        value = out[key]
+        field = fields[key]
+        if value is None and not field.is_required() and field.default is not None:
+            del out[key]  # strict schemas make the model send null for a defaulted key
+            repaired.append(f"{key}: null→default")
+            continue
+        if not _int_field(model, key):
+            continue
+        if isinstance(value, str) and _INT_STR.match(value):
+            value = int(float(value))
+            repaired.append(f"{key}: str→int")
+        elif isinstance(value, float) and value.is_integer():
+            value = int(value)
+            repaired.append(f"{key}: float→int")
+        if isinstance(value, int) and not isinstance(value, bool):
+            lo, hi = _bounds(model, key)
+            clamped = value if lo is None else max(lo, value)
+            clamped = clamped if hi is None else min(hi, clamped)
+            if clamped != value:
+                repaired.append(f"{key}: {value}→{clamped}")
+            value = clamped
+        out[key] = value
+    return Tolerated(out, ignored, repaired)
 
 
 def _ms(t0: float) -> int:
@@ -230,12 +342,13 @@ class ToolDispatcher:
         t0 = time.perf_counter()
         error: str | None = None
         scrubbed = scrub_args(args)  # raw args on every failure path: never log file content
+        fixed = tolerate_args(name, args)
         if name not in _ARGS:
             error = f"unknown tool {name}; available: {', '.join(TOOL_NAMES)}"
             result = ToolResult(name, False, error, None, box, _ms(t0), False)
         else:
             try:
-                parsed = _ARGS[name].model_validate(args)
+                parsed = _ARGS[name].model_validate(fixed.args)
             except ValidationError as err:
                 error = _format_errors(name, err)
                 result = ToolResult(name, False, error, None, box, _ms(t0), False)
@@ -253,6 +366,10 @@ class ToolDispatcher:
         }
         if error is not None:
             data["error"] = error
+        if fixed.ignored:  # tolerated, not rejected: kept on the event so the habit is measurable
+            data["ignored_args"] = scrub_args(fixed.ignored)
+        if fixed.repaired:
+            data["repaired_args"] = fixed.repaired
         self._log.emit(self._phase, "tool", data, ms=result.ms)
         return result
 
@@ -280,12 +397,13 @@ class ToolDispatcher:
             source = res.stdout
             if parsed.end_line is not None:
                 source = "".join(source.splitlines(keepends=True)[: parsed.end_line])
-            text, cut = page_lines(source, parsed.start_line, self._read_limit)
+            text, cut, end = _paginate(source, parsed.start_line, self._read_limit)
+            n = len(res.stdout.splitlines())
             if text is None:
-                n = len(res.stdout.splitlines())
                 msg = f"start_line={parsed.start_line} is past the end ({n} lines)"
                 return ToolResult(name, False, msg, 1, box, _ms(t0), False)
-            return ToolResult(name, True, text, 0, box, _ms(t0), cut)
+            span = (parsed.start_line, end)
+            return ToolResult(name, True, text, 0, box, _ms(t0), cut, span, n)
         if isinstance(parsed, GrepArgs):
             shell = _GREP.format(pattern=shlex.quote(parsed.pattern), path=shlex.quote(parsed.path))
             res = box.run(shell, cwd=cwd, keep=False)

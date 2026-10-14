@@ -64,7 +64,26 @@ class Plan(BaseModel):
     files_to_touch: list[str]
     tests_to_add: list[str]
     landing_order: list[str]
-    risk_class: list[RiskClass]
+    risk_class: list[RiskClass] = Field(
+        description=(
+            "Every class the change itself touches; ['none'] when none applies. "
+            "money: amounts, prices, balances, currency rounding, payments. "
+            "tax: tax rates, tax computation, tax reporting. "
+            "schema: a DATABASE or persistent-storage schema — tables, columns, constraints, "
+            "indexes, ORM models backed by a database, migrations. Changing a public data or "
+            "serialization format (JSON/XML/CSV/YAML output, key or field order, an API "
+            "payload shape) is NOT schema. "
+            "security: authentication, authorization, access control, secrets, injection, "
+            "crypto. concurrency: races, locking, idempotency, transactions under parallel load."
+        )
+    )
+    risk_rationale: str = Field(
+        default="",
+        description=(
+            "One sentence per class in risk_class naming the code that puts the change in that "
+            "class (e.g. 'schema: adds a column via an alembic migration'); for none, why none."
+        ),
+    )
     citations: list[Citation]
     acceptance: list[str] = Field(description="Human-readable checks the verifier will run.")
 
@@ -106,7 +125,14 @@ class RaceResult(BaseModel):
 class Verdict(BaseModel):
     decision: Decision
     theater_failed_on_base: bool
-    theater_inconclusive: bool = False  # collection error / no tests ran on base: not proof
+    theater_inconclusive: bool = False  # no tests ran / no per-test outcomes on base: not proof
+    # red on base for a reason that is not the issue's (NameError, fixture, collection error), or
+    # a new test still red with the fix: the repro does not count (verify/theater.py)
+    theater_invalid: bool = False
+    theater_tests: dict[str, str] = Field(
+        default_factory=dict,
+        description="New test node id -> why it does or does not count as a repro.",
+    )
     suite: dict[str, int] = Field(
         default_factory=dict, description="e.g. {'passed': 214, 'failed': 0}"
     )

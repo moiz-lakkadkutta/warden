@@ -132,3 +132,98 @@ def test_failed_regression_and_spec_rows_name_what_broke() -> None:
     body = evidence_table(1, "t", _bare_plan(), v, cost_usd=0, calls_by_model={})
     assert "| Existing tests on candidate | 1 test green on base is red" in body
     assert "| Issue's stated behaviours | 1 of 2 stated behaviours not implemented" in body
+
+
+def test_evidence_table_shows_an_invalid_repro_and_each_new_tests_reason() -> None:
+    plan = Plan(
+        issue=1928,
+        summary="s",
+        files_to_touch=["a.py"],
+        tests_to_add=["t.py"],
+        landing_order=[],
+        risk_class=["none"],
+        citations=[],
+        acceptance=[],
+    )
+    v = Verdict(
+        decision="FAIL",
+        theater_failed_on_base=False,
+        theater_invalid=True,
+        theater_tests={
+            "src/x/tests/test_recur.py::test_xcal": "invalid: fails on base (AssertionError), "
+            "and still fails with the fix",
+            "src/x/tests/test_jcal.py::test_jcal": "repro: fails on base (AssertionError), "
+            "passes with the fix",
+        },
+        mypy_ok=True,
+        ruff_ok=True,
+        alembic_single_head=True,
+        openapi_drift=False,
+    )
+    body = evidence_table(1928, "t", plan, v, cost_usd=0.2, calls_by_model={})
+    row = next(line for line in body.splitlines() if line.startswith("| New tests on unfixed"))
+    assert "invalid repro" in row and "tests are theater" not in row
+    assert "`test_recur.py::test_xcal`: invalid: fails on base (AssertionError), and still" in row
+    assert "<br>`test_jcal.py::test_jcal`: repro: fails on base" in row
+
+
+# ------------------------------------------------------------------------ template + disclosure
+def test_disclosure_names_warden_and_every_model() -> None:
+    from warden.integrate.pr import disclosure
+
+    routing = [("planner", "nv/ultra"), ("implementer", "nv/super"), ("tools", "nv/lightning"),
+               ("verdict", "nv/ultra")]  # fmt: skip
+    md = disclosure(routing, {"nv/ultra": 3, "nv/super": 1})
+    assert md.startswith("## AI disclosure\n")
+    assert "[Warden](https://github.com/moiz-lakkadkutta/warden)" in md
+    assert "- `nv/ultra` (planner / verdict, 3 calls)" in md
+    assert "- `nv/super` (implementer, 1 call)" in md
+    assert "- `nv/lightning` (tools)" in md
+    assert "never merges" in md
+
+
+def test_default_body_is_evidence_then_disclosure() -> None:
+    from warden.integrate.pr import render_pr_body
+
+    body = render_pr_body(
+        None, evidence="EVID\n", disclosure_md="## AI disclosure\nD\n", issue=1, title="t",
+        repo="o/r", run_id="r1", models="m",
+    )  # fmt: skip
+    assert body == "EVID\n\n## AI disclosure\nD\n"
+
+
+def test_template_fields_and_appended_disclosure() -> None:
+    from warden.integrate.pr import render_pr_body
+
+    tpl = "Closes #$issue in $repo ($run_id, $models) costs $$5 ${title}x $unknown\n\n$evidence"
+    body = render_pr_body(
+        tpl, evidence="EVID", disclosure_md="## AI disclosure\nD", issue=7, title="T",
+        repo="o/r", run_id="r1", models="m1, m2",
+    )  # fmt: skip
+    assert body.startswith("Closes #7 in o/r (r1, m1, m2) costs $5 Tx $unknown\n\nEVID\n")
+    assert body.endswith("\n## AI disclosure\nD\n")  # no $disclosure: appended, never dropped
+
+
+def test_example_icalendar_template_fills_every_placeholder() -> None:
+    from pathlib import Path
+
+    from warden.integrate.pr import render_pr_body
+
+    tpl = Path(__file__).resolve().parents[1] / "examples" / "pr-templates" / "icalendar.md"
+    body = render_pr_body(
+        tpl.read_text(), evidence="EVID", disclosure_md="## AI disclosure", issue=1928,
+        title="t", repo="collective/icalendar", run_id="r1", models="m",
+    )  # fmt: skip
+    assert "$" not in body
+    assert body.startswith("## Linked issue\n\n- Closes #1928\n")
+    assert body.count("## AI disclosure") == 1 and "[x]" not in body  # Warden ticks nothing
+
+
+def test_template_without_evidence_still_carries_it() -> None:
+    from warden.integrate.pr import render_pr_body
+
+    body = render_pr_body(
+        "$disclosure\n", evidence="EVID", disclosure_md="DISC", issue=1, title="t", repo="o/r",
+        run_id="r", models="m",
+    )  # fmt: skip
+    assert body == "DISC\n\nEVID\n"

@@ -9,6 +9,7 @@ from warden.sandbox.box import Box
 from warden.sandbox.fake import FakeBackend, FakeImage
 from warden.schemas import Verdict
 from warden.verify.gate import DEFAULT_COMMANDS, GateResult, parse_suite, run_gate
+from warden.verify.tail import TAIL_BYTES, keep_tail, was_cut
 
 VERDICT_KEYS = {"suite", "mypy_ok", "ruff_ok", "alembic_single_head", "openapi_drift"}
 
@@ -106,7 +107,7 @@ def test_every_gate_command_emits_sandbox_event(log: EventLog) -> None:
     sandbox = [e for e in events if e.kind == "sandbox"]
     c = DEFAULT_COMMANDS
     expected = [
-        c.suite,
+        keep_tail(c.suite),
         c.mypy,
         c.ruff_check,
         c.ruff_format,
@@ -154,6 +155,84 @@ def test_parse_suite_ignores_counts_outside_summary_line() -> None:
     assert parse_suite(probe) == {"passed": 4, "failed": 1}
     quiet = "collected 3 passed hints\n3 passed in 0.02s\n"
     assert parse_suite(quiet) == {"passed": 3, "failed": 0}
+
+
+@pytest.mark.parametrize(
+    ("line", "counts"),
+    [
+        (
+            "21314 passed, 42 skipped, 597 xfailed in 69s",
+            {"passed": 21314, "failed": 0, "skipped": 42, "xfailed": 597},
+        ),
+        (
+            "2 failed, 21310 passed, 42 skipped, 597 xfailed, 41 warnings in 67.53s (0:01:07)",
+            {"failed": 2, "passed": 21310, "skipped": 42, "xfailed": 597},
+        ),
+        ("==== 3 passed, 1 error in 2s ====", {"passed": 3, "failed": 0, "errors": 1}),
+    ],
+)
+def test_parse_suite_reads_quiet_summaries(line: str, counts: dict[str, int]) -> None:
+    noise = "src/x.py: 4 warnings\n  return vDatetime.from_ical(ical)\n" * 3000  # > 100 KB
+    assert parse_suite(f"{noise}{line}\n") == counts
+
+
+class _HeadCapped:
+    """Contree in miniature: stdout capped at 65535 bytes keeping the HEAD; a real shell's
+    `> log; tail -c N log` keeps the tail. The suite prints 200 KB of failures then its summary."""
+
+    CAP = 65535
+    OUTPUT = "E   AssertionError: long traceback line\n" * 5000 + "2 failed, 9 passed in 69s\n"
+
+    def __init__(self) -> None:
+        self.shells: list[str] = []
+
+    def use(self, ref: str) -> str:
+        return ref
+
+    def run(self, image: object, *, shell: str, keep: bool, **_: object) -> object:
+        self.shells.append(shell)
+        code = 1 if "pytest" in shell else 0
+        out = self.OUTPUT if "pytest" in shell else ""
+        if "tail -c " in shell:
+            out = out[-int(shell.split("tail -c ")[1].split()[0]) :]
+        return out[: self.CAP], "", code, (f"{image}+" if keep else None), ""
+
+    def tag(self, image: object, name: str) -> None:
+        return None
+
+    def uuid_of(self, image: object) -> str:
+        return str(image)
+
+
+def test_long_suite_output_keeps_its_summary(log: EventLog) -> None:
+    """Run 20261014-123938-6f4c: 200 KB of failures, Contree kept the head, "no summary"."""
+    backend = _HeadCapped()
+    assert parse_suite(_HeadCapped.OUTPUT[: _HeadCapped.CAP]) == {}  # the bug, head kept
+    result = run_gate(Box(backend, "cand", log), log, wrap="testbed-env sh -c")
+    assert result.suite == {"failed": 2, "passed": 9}
+    assert not result.suite_ok and not result.suite_timed_out
+    suite_shell = backend.shells[0]
+    assert suite_shell == f"testbed-env sh -c '{keep_tail('pytest -q')}'"
+    assert result.steps[0].shell == "pytest -q"  # the step records the plain command
+
+
+def test_keep_tail_preserves_exit_and_marks_a_cut_tail() -> None:
+    shell = keep_tail("cd backend && pytest -q")
+    assert shell.startswith("cd backend && pytest -q > ")
+    assert shell.endswith("; exit $rc") and f"tail -c {TAIL_BYTES} " in shell
+    assert TAIL_BYTES < _HeadCapped.CAP
+    assert was_cut("x" * TAIL_BYTES) and not was_cut("3 passed in 1s\n")
+
+
+def test_keep_tail_in_a_real_posix_shell(tmp_path: Path) -> None:
+    import subprocess
+
+    cmd = "seq 1 50000; echo '1 failed, 3 passed in 9s' >&2; exit 3"
+    shell = keep_tail(f"sh -c {cmd!r}", 200, log=str(tmp_path / "out.log"))
+    res = subprocess.run(["sh", "-c", shell], capture_output=True, text=True, check=False)
+    assert res.returncode == 3
+    assert len(res.stdout) <= 200 and res.stdout.endswith("1 failed, 3 passed in 9s\n")
+    assert parse_suite(res.stdout) == {"failed": 1, "passed": 3}
 
 
 @pytest.mark.parametrize("stdout", ["", "no tests ran in 0.01s\n", "Traceback: ImportError\n"])

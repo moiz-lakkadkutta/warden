@@ -75,25 +75,32 @@ winner won; the PR evidence table says "chosen from N candidates"; every event c
 
 ## Results
 
-SWE-rebench pilot, 10 tasks (`warden eval --n 10 --seed 7`, $1/task cap, 40 tool turns). Every
-row is in [`evals/swe_rebench/results.csv`](evals/swe_rebench/results.csv); the task ids are in
-[`task_ids.txt`](evals/swe_rebench/task_ids.txt). "Resolved" means the dataset's hidden tests
-pass, and Warden never sees those tests.
+SWE-rebench pilots, the same 10 tasks (`warden eval --n 10 --seed 7`, $1/task cap, 40 tool
+turns; pilot 3's last two tasks ran at $0.40 to stay inside its budget). Every row is in [`evals/swe_rebench/results.csv`](evals/swe_rebench/results.csv) (pilot 2)
+and [`evals/swe_rebench/pilot-3/results.csv`](evals/swe_rebench/pilot-3/results.csv) (pilot 3); the
+task ids are in [`task_ids.txt`](evals/swe_rebench/task_ids.txt). "Resolved" means the dataset's
+hidden tests pass, and Warden never sees those tests.
 
 <!-- results:start -->
-| metric | pilot 2 (2026-10-14) |
-|---|---|
-| Resolved | **4 / 10** |
-| Verifier PASS that hidden tests reject (false PASS) | 3 of 5 PASS |
-| Verifier FAIL on a fix hidden tests accept (false FAIL) | 1 of 5 FAIL (ran out of turns before writing a test) |
-| Unverified (FAIL only because the suite timed out) | 1 |
-| Theater catches (new test already passes on the unfixed base) | 1 |
-| Cost | **$0.13 / task**, $1.33 total |
+| metric | pilot 2 | pilot 3 (+ regression check, spec review) |
+|---|---|---|
+| Resolved | **4 / 10** | **1 / 10** |
+| Verifier PASS that hidden tests reject (false PASS) | 3 of 5 PASS | 1 of 1 PASS |
+| Verifier FAIL on a fix hidden tests accept (false FAIL) | 1 of 5 FAIL (ran out of turns before writing a test) | 1 of 8 FAIL (ran out of turns; no test) |
+| Unverified (FAIL only because the suite timed out) | 1 | 0 |
+| Harness error | 0 | 1 (Sandboxes API 500; retry added) |
+| Theater catches (new test already passes on the unfixed base) | 1 | 0 |
+| Cost | **$0.13 / task**, $1.33 total | **$0.18 / task**, $1.78 total |
 <!-- results:end -->
 
-Pilot 2 ran *before* the regression check and spec review existed. All three false PASSes came
-from the implementer fixing its own reading of the issue, which is the failure those two checks
-target. The next eval measures them. At 10 tasks these numbers are a pilot, not a benchmark.
+What pilot 3 shows about the new checks: the regression check stopped one false PASS (planet: the
+fix broke catalog requests, and the hidden tests fail there too). It missed one: on spikeinterface
+it did not select the module's own test file, so it never ran. On pamqp it flagged tests the
+upstream fix changes on purpose. The resolved count fell from 4 to 1, and that is not the
+verifier, because hidden tests grade the fix. The implementer code was unchanged, and Super's tool
+use varied run to run (one clobbered a 19 kB file with a 309-byte fragment; 7 of 10 runs used all
+40 turns). The same task resolves in some runs and not in others. At 10 tasks and one run each,
+these numbers are a pilot, not a benchmark; details in `docs/status.md` §1e.
 
 ## How it works
 
@@ -105,7 +112,10 @@ issue ─▶ PLANNER (Ultra + Tavily citations, sandbox code context) ─▶ Pla
 ```
 
 Every model call and sandbox operation is appended to `runs/<id>/events.jsonl` with tokens, cost
-and wall-clock; `warden console` renders it. A per-issue cost cap stops the run cleanly, and
+and wall-clock; `warden console` renders it to one self-contained HTML page plus
+`runs/<id>/timeline.gif` (Pillow, `uv sync --extra gif`), and `warden console <id>... --out site`
+writes a static site (index + one page per run) that `.github/workflows/console-pages.yml`
+publishes to GitHub Pages. A per-issue cost cap stops the run cleanly, and
 `warden resume <run_id>` continues from the last completed phase.
 
 ## Quickstart (live)
@@ -119,6 +129,48 @@ uv run warden eval --n 10 --seed 7 --budget 5             # SWE-rebench sample, 
 ```
 
 [examples/demo-issue-201](examples/demo-issue-201) is a recorded `--demo` run; CI replays it offline.
+
+## Use it in your repo
+
+Add the `warden` label to an issue and Warden opens a **draft** PR with the evidence table, then
+comments on the issue with the PR link (or why there is none, and what the run cost). Copy this to
+`.github/workflows/warden.yml`:
+
+```yaml
+name: warden
+on:
+  issues:
+    types: [labeled]
+permissions:
+  contents: write        # push the warden/fix-* branch
+  pull-requests: write   # open the draft PR
+  issues: write          # comment on the issue, create the PENDING-HUMAN label
+jobs:
+  fix:
+    if: github.event.label.name == 'warden' && !github.event.issue.pull_request
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: moiz-lakkadkutta/warden@main   # pin a commit sha in production
+        with:
+          nebius-api-key: ${{ secrets.NEBIUS_API_KEY }}
+          nebius-project-id: ${{ secrets.NEBIUS_PROJECT_ID }}
+          tavily-api-key: ${{ secrets.TAVILY_API_KEY }}
+          base-image: ${{ vars.WARDEN_BASE_IMAGE }}   # your repo at /src, test deps installed
+          test-command: pytest -q
+          max-usd: "2.0"
+          # planner-model / implementer-model / tools-model override the Nemotron defaults
+```
+
+Set the secrets `NEBIUS_API_KEY`, `NEBIUS_PROJECT_ID`, `TAVILY_API_KEY` and the variable
+`WARDEN_BASE_IMAGE`, and create a `warden` label. All inputs are in [action.yml](action.yml).
+
+What it will not do: run for a labeler without write access, run in a fork, check out PR code,
+put a token in a sandbox (the patch leaves the sandbox and is pushed from the runner), push a
+change to `.github/`, or merge. Issue text reaches the models fenced as untrusted data, and issue
+comments are never read. Money / tax / schema / security fixes get `PENDING-HUMAN`. PRs opened
+with the default `GITHUB_TOKEN` do not trigger your CI; pass a GitHub App token as `github-token`
+if you want CI on them.
 
 ## Limitations
 

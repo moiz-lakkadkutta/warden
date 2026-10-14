@@ -334,3 +334,50 @@ def test_planner_prompt_names_fabric_only_for_the_fabric_profile() -> None:
     assert "{repo}" not in fabric and "{repo}" not in generic
     assert "double-entry ledger" in fabric
     assert "double-entry ledger" not in generic and "Python repository" in generic
+
+
+# ------------------------------------------------------------------ risk class
+
+
+def test_risk_class_schema_means_database_not_a_serialization_format() -> None:
+    """Run 20261014-123340-85cd: key order in a calendar library's jCal output was labelled
+    `schema` (→ PENDING-HUMAN). The definitions the model sees now rule that out."""
+    from warden.pipeline import planner_prompt
+
+    prop = Plan.model_json_schema()["properties"]["risk_class"]["description"]
+    assert "DATABASE" in prop and "migrations" in prop
+    assert "serialization format" in prop and "is NOT schema" in prop
+    for profile in ("fabric", "swe"):
+        prompt = planner_prompt(profile)
+        assert "A public data or serialization format is NOT schema" in prompt
+        assert "risk_rationale" in prompt
+    assert "risk_rationale" in Plan.model_json_schema()["properties"]
+
+
+def test_risk_rationale_is_optional_and_the_human_gate_is_unchanged() -> None:
+    base = _plan([]).model_dump(exclude={"risk_rationale"})
+    assert Plan.model_validate(base).risk_rationale == ""  # recorded plans still load
+    for risk, human in [
+        (["money"], True),
+        (["tax"], True),
+        (["schema"], True),
+        (["security"], True),
+        (["concurrency"], False),
+        (["none"], False),
+    ]:
+        assert Plan.model_validate({**base, "risk_class": risk}).needs_human is human, risk
+
+
+def test_plan_issue_logs_risk_class_with_its_rationale(tmp_path: Path) -> None:
+    issue = IssueText(number=196, title="KPIs count DRAFT", body="`sales_today` moves", comments=[])
+    plan = _plan([]).model_copy(
+        update={"risk_rationale": "money: changes which invoices count toward sales KPIs"}
+    )
+    llm = FakeLLM([ResearchQueries(queries=[], code_terms=[]), plan])
+    log = _log(tmp_path)
+    plan_issue(llm, issue, context=lambda t, w=True: "", search=lambda q: [], log=log, prompt="S")
+    notes = [e["data"] for e in _events(log) if e["kind"] == "note"]
+    assert {
+        "risk_class": ["money"],
+        "risk_rationale": "money: changes which invoices count toward sales KPIs",
+    } in notes

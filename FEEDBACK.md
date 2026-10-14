@@ -74,6 +74,14 @@ Every entry: date · tool · what happened · numbers · what would have helped.
   `install_config.install` first; (4) a run past its `timeout` raises `OperationTimedOutError`
   from `.wait()` rather than returning an exit code. With (1)–(3) handled, all 10 sampled bases
   grade as expected (F2P fails, 606/606 P2P pass, 4–18 s to prepare).
+- 2026-10-14 · D3 pilot 3 · `GET /sandboxes/v1/operations/{id}` returned **HTTP 500**
+  (`Internal Error`, 49-byte body) 8 min 23 s into a run (13:32:12 → 13:40:35 UTC). The run was a
+  pytest file that hangs without an AMQP broker (smok-serwis__coolamqp-28, theater check, 1800 s
+  timeout). The SDK raised `ApiStatusCodeError(status=500)` from `.wait()`, so the task ended as an
+  ERROR row after $0.12 of model spend and 1823 s. Warden now retries a run twice on a 5xx
+  (`8632d19`). → document whether a 5xx on the operations endpoint means the operation failed or
+  only the poll did, and whether polling the same operation id again is safe. Retrying the poll
+  would be cheaper than re-running the command.
 
 - 2026-10-14 · runtime · `run()` stdout is silently cut at **65,535 bytes**, with no flag or marker
   on the result. A `pytest -rA` log for coverahealth__dataspec-30 (672 P2P ids) lost its last 77
@@ -135,6 +143,21 @@ Every entry: date · tool · what happened · numbers · what would have helped.
   and the run ended with no change ($0.084 implementer, $0.11 total). Warden now accepts `end_line`
   (f114db8). → document whether Token Factory honours `strict: true` on tool definitions for
   Nemotron, so schema-conformant arguments can be guaranteed instead of validated after the fact.
+- 2026-10-14 · tool calls · Nemotron 3 Super re-reads instead of editing: on icalendar#1928 (run
+  20261014-123340-85cd, 40-turn cap) 26 of 40 turns were read_file calls on 4 files it had already
+  been shown, often the same range twice (recur.py 237-260 at turns 31 and 40), and it never
+  wrote the fix. With a 60-turn cap (20261014-123938-6f4c) it finished, in 52 turns. Warden now
+  tolerates invented/mistyped arguments (drop, coerce, clamp; recorded on the event), answers an
+  unchanged re-read with a one-line note, and nudges after 8 turns without write_file/run_shell.
+  → a recommended sampling setup (or a "tool-use" system-prompt preset) for Super that curbs
+  repeated identical tool calls would help every agent built on it.
+- 2026-10-14 · D3 pilot 3 · Nemotron 3 Super sometimes sends a *fragment* as `write_file`'s
+  whole-file `content`. On pennylane-5831 (run 20261014-123250-d047) it replaced the 19 089-byte
+  `exp.py` with 309 bytes (one method) at turn 9, and again at turn 39. The same task on the same
+  prompt (hash 58fdd824ab34) wrote the whole file and resolved in 10 turns in pilot 2. In pilot 3,
+  7 of 10 tasks used all 40 turns (pilot 2: 5). → guidance on which edit-tool shape Super is
+  trained on (whole file vs str_replace vs unified diff) would let agents pick the one it uses
+  reliably.
 - (fill in after Phase B3) Lightning as a tool router: turn count, wrong-tool rate.
 
 ## Nebius Serverless

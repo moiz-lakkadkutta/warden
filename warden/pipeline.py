@@ -38,6 +38,8 @@ MARKER: dict[Phase, str] = {
     "pr": "pr.json",
 }
 Mode = Literal["demo", "live"]
+# A repo's own suite (WARDEN_TEST_CMD) gets 10 min; a hang past that is inconclusive, not red.
+EXTERNAL_SUITE_TIMEOUT = 600
 
 
 class Progress(Protocol):
@@ -552,9 +554,13 @@ def _base_box(ctx: StepContext, phase: Phase) -> Any:
 
 
 def _live_hunt(ctx: StepContext) -> IssueRef:
-    """For `--issue N`: fetch the issue (the Hunter proper lands in C5)."""
+    """For `--issue N`: fetch the issue (the Hunter proper lands in C5). With `--from-event` the
+    issue text came from the GitHub event payload: no `gh` call, and no comments."""
     from warden.hunt.issue import fetch_issue
 
+    if ctx.issue is not None:
+        ctx.progress.step(f"#{ctx.issue.number} {ctx.issue.title}")
+        return IssueRef(issue=ctx.issue.number, title=ctx.issue.title)
     if ctx.requested_issue is None:
         raise NotReadyError("autonomous hunting lands in C5", fix="pass --issue N")
     issue = fetch_issue(ctx.settings.target_repo, ctx.requested_issue, include_comments=True)
@@ -618,6 +624,8 @@ def _live_fix(ctx: StepContext, plan: Plan) -> Candidate:
         ctx.log,
         dispatcher=dispatcher,
         max_tool_turns=s.max_tool_turns,
+        idle_nudge_after=s.idle_nudge_after,
+        read_cache=s.read_cache,
         progress=ctx.progress,
         lint=profile.lint,
         autofix=profile.autofix,
@@ -637,9 +645,23 @@ def planner_prompt(profile: str) -> str:
 
 
 def _live_verify(ctx: StepContext, plan: Plan, cand: Candidate) -> Verdict:
+    from dataclasses import replace
+
     from warden.verify.gate import PROFILES
 
-    return verify_candidate(ctx, cand, PROFILES[ctx.settings.gate_profile], issue_number=plan.issue)
+    s = ctx.settings
+    profile = PROFILES[s.gate_profile]
+    if not s.test_cmd:
+        return verify_candidate(ctx, cand, profile, issue_number=plan.issue)
+    # The repo's own test command: the gate's suite and the regression check (per-test outcomes).
+    return verify_candidate(
+        ctx,
+        cand,
+        replace(profile, suite=s.test_cmd),
+        issue_number=plan.issue,
+        regression_cmd=f"{s.test_cmd} -rA",
+        suite_timeout=EXTERNAL_SUITE_TIMEOUT,
+    )
 
 
 def verify_candidate(
@@ -672,7 +694,18 @@ def verify_candidate(
             for f in files
         }
         theater = theater_check(
-            base, new_tests, node_ids=cand.tests_added, cwd=s.workdir, wrap=s.shell_wrap
+            base,
+            new_tests,
+            node_ids=cand.tests_added,
+            cwd=s.workdir,
+            wrap=s.shell_wrap,
+            candidate=candidate,
+            issue_text=f"{ctx.issue.title}\n{ctx.issue.body}" if ctx.issue else "",
+        )
+        ctx.log.artifact(
+            "theater.txt",
+            "".join(f"{n}: {r}\n" for n, r in theater.reasons.items())
+            + f"\n# base (exit {theater.exit_code})\n{theater.stdout}",
         )
         ctx.log.note("verify", f"theater: {theater.label}")
         ctx.progress.step(f"theater: {theater.label}")
@@ -753,11 +786,46 @@ def _spec_check(ctx: StepContext, diff: str, cand: Candidate, issue_number: int)
     return spec
 
 
+def pr_body(ctx: StepContext, ref: IssueRef, evidence: str, calls: dict[str, int]) -> str:
+    """The PR body: WARDEN_PR_TEMPLATE (or the built-in one) with the evidence + AI disclosure."""
+    from warden.integrate.pr import disclosure, render_pr_body
+
+    s = ctx.settings
+    template = None
+    if s.pr_template:
+        path = Path(s.pr_template).expanduser()
+        if not path.is_file():
+            raise NotReadyError(
+                f"WARDEN_PR_TEMPLATE {s.pr_template} is not a file",
+                fix="point WARDEN_PR_TEMPLATE at a markdown file, or unset it",
+            )
+        template = path.read_text(encoding="utf-8")
+    routing = s.routing_table()
+    return render_pr_body(
+        template,
+        evidence=evidence,
+        disclosure_md=disclosure(routing, calls),
+        issue=ref.issue,
+        title=ref.title,
+        repo=s.target_repo,
+        run_id=ctx.log.run_id,
+        models=", ".join(dict.fromkeys(m for _, m in routing)),
+    )
+
+
 def _live_pr(
     ctx: StepContext, issue: IssueRef, plan: Plan, cand: Candidate, verdict: Verdict
 ) -> PrOutcome:
-    from warden.integrate.branch import export_patch, push_fix_branch
-    from warden.integrate.pr import confirm_pr, evidence_table, labels_for, open_draft_pr
+    from warden.integrate.branch import export_patch, push_fix_branch, refuse_protected
+    from warden.integrate.fork import resolve_push_target
+    from warden.integrate.pr import (
+        PENDING_LABEL,
+        PrOpenError,
+        confirm_pr,
+        evidence_table,
+        labels_for,
+        open_draft_pr,
+    )
     from warden.sandbox.box import open_base
 
     s = ctx.settings
@@ -774,7 +842,7 @@ def _live_pr(
         if ev.kind == "llm":
             model = str(ev.data.get("model", "?"))
             calls[model] = calls.get(model, 0) + 1
-    body = evidence_table(
+    evidence = evidence_table(
         issue.issue,
         issue.title,
         plan,
@@ -783,6 +851,7 @@ def _live_pr(
         calls_by_model=calls,
         note=note,
     )
+    body = pr_body(ctx, issue, evidence, calls)
     title = f"{'[Warden replay] ' if ctx.at_rev else '[Warden] '}#{issue.issue} {issue.title}"
     label = labels[0] if labels else None
     if verdict.decision == "FAIL":
@@ -791,9 +860,17 @@ def _live_pr(
     if not confirm_pr(ctx.yes, what=f"{s.target_repo}: {title}", run_id=ctx.log.run_id):
         return PrOutcome(body=body, title=title, label=label, url=None)
 
+    # Push only where GitHub grants push access; otherwise to the user's own fork.
+    target = resolve_push_target(s.target_repo, log=ctx.log)
+    if target.forked and ctx.at_rev is not None:
+        raise PrOpenError(
+            f"a replay PR needs push access to {s.target_repo} (its base branch lives there).",
+            fix="replay on a repo you can push to, or drop --at",
+        )
     candidate = open_base(s, ctx.log, phase="pr").sibling(cand.image_uuid)
     patch = export_patch(candidate, cwd=s.workdir, issue=issue.issue, title=issue.title)
     ctx.log.artifact("candidate.patch", patch)
+    refuse_protected(patch)  # a fix never rewrites CI: issue text may be a prompt injection
     base_rev = None
     if ctx.at_rev is not None:
         sha = candidate.run(f"git rev-parse {ctx.at_rev}", cwd=s.workdir, keep=False)
@@ -805,10 +882,23 @@ def _live_pr(
         run_id=ctx.log.run_id,
         base_rev=base_rev,
         cache_dir=s.runs_dir / ".repos" / s.target_repo.replace("/", "__"),
+        push_url=target.push_url,
+        base_branch=s.base_branch,
     )
-    ctx.progress.step(f"pushed {pushed.head} on {pushed.base}")
+    ctx.progress.step(f"pushed {pushed.head} to {target.repo}, base {pushed.base}")
+    pr_labels = labels
+    if target.forked and labels:
+        # A fork's author cannot label the upstream PR: the label goes in the title instead.
+        pr_labels = []
+        title = f"[{PENDING_LABEL}] {title}"
     pr = open_draft_pr(
-        s.target_repo, pushed.head, pushed.base, title, body, labels=labels, log=ctx.log
+        s.target_repo,
+        target.head(pushed.head),
+        pushed.base,
+        title,
+        body,
+        labels=pr_labels,
+        log=ctx.log,
     )
     ctx.progress.step(f"draft PR {pr.url}")
     return PrOutcome(body=body, title=title, label=label, url=pr.url)

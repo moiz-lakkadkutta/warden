@@ -155,7 +155,59 @@ Same 10 tasks (`--seed 7`, cap $1/task, 40 turns) after `09f44fd` (old tool outp
   600 s suite timeout; results.csv backfilled, so coolamqp now counts as unverified.
 - **Spend 2026-10-14: $5.45** in total ($4.12 before pilot 2 + $1.33).
 
-### 1e. E1 prepared (2026-10-14): 50-task sample, bases checked, sharded runs, generated table
+### 1e. D3 pilot 3 (2026-10-14): regression check + spec review, 1/10 resolved, 0/1 PASS precision
+
+Same 10 tasks (`--seed 7`, 40 turns, cap $1/task; the last two at $0.40/task so the run stayed within
+the $3 approval) on `45e0218`, which adds the regression check and spec review to pilot 2's code.
+Results: `evals/swe_rebench/pilot-3/results.csv`. A first attempt ran with `.env`'s
+`WARDEN_MAX_TOOL_TURNS=25` and was stopped after 5 tasks as not comparable:
+`attempts/results-2026-10-14-pilot-3-25turns.csv` (0/5 resolved, pennylane resolved but FAIL, $0.63).
+
+| task | verdict | hidden tests | turns | $ | what decided the verdict |
+|---|---|---|---|---|---|
+| MatterMiners__tardis-77 | FAIL | not resolved | 40 (budget) | 0.10 | did not finish; regression (56 tests) green, spec 1 met / 1 unclear |
+| PennyLaneAI__pennylane-5831 | FAIL | not resolved | 40 (budget) | 0.15 | `exp.py` overwritten by a 309-byte fragment → IndentationError, suite red |
+| SpikeInterface__spikeinterface-2775 | PASS | **not resolved (false PASS)** | 10 | 0.07 | theater ✓, 3 tests green, spec 3/3; **regression not run** |
+| astropy__photutils-1956 | FAIL | not resolved | 40 (budget) | 0.35 | did not finish, no tests; spec: 1 of 2 behaviours unmet |
+| gmr__pamqp-52 | FAIL | **resolved (false FAIL)** | 40 (budget) | 0.32 | did not finish, no tests; regression flagged 10 tests, all in the task's F2P list |
+| iossifovlab__gpf-446 | FAIL | not resolved | 40 (budget) | 0.22 | did not finish; suite 6 failed |
+| joshuadavidthomas__django-bird-58 | FAIL | not resolved | 10 | 0.04 | no new tests |
+| planetlabs__planet-client-python-978 | FAIL | not resolved | 38 | 0.26 | **regression only**: `test_request_catalog_success` red on candidate |
+| python-wheel-build__fromager-352 | FAIL | not resolved | 40 (budget) | 0.14 | did not finish (green at turn 10, never called `finish`); regression (45) + spec 3/3 green |
+| smok-serwis__coolamqp-28 | ERROR | — | — | 0.12 | Sandboxes API **500** on `GET /operations/{id}` during the theater run → fixed `8632d19` |
+
+- **PASS precision 0/1** (pilot 2: 2/5). Only one PASS, so precision is not measurable yet. What
+  changed is that 4 of pilot 2's 5 PASS tasks did not produce a working fix this time.
+- **The new checks caught 1 and missed 1, and caused 1 avoidable FAIL.**
+  - *Caught:* planet. The fix broke catalog requests. The regression check was the only red row,
+    and the hidden tests fail in the same area (`test_catalog_source_*`). That is a prevented false PASS.
+  - *Missed:* spikeinterface. The regression check did not run ("no existing test names a changed
+    module"). `related_tests` greps file *contents* for the stem `curationsorting`, which is
+    case-sensitive. The test file `test_curationsorting.py` only mentions `CurationSorting`, so it
+    was never selected, although its name matches. The spec review agreed with the model's reading
+    (3/3 met). The hidden `test_curation` fails.
+  - *Would have missed:* tardis and fromager were pilot 2's false PASSes. This time both FAILed
+    only because the implementer used all 40 turns. Their regression and spec rows were green,
+    so a finished run would most likely have been a false PASS again.
+  - *False alarm:* pamqp. All 10 "regressions" are tests whose expectations the upstream fix
+    changes on purpose (naive → aware datetimes; they are the task's F2P tests). It FAILed anyway
+    for not finishing. A regression the issue asks for is a changed expectation, not a break.
+- **Resolved 1/10 (pilot 2: 4/10): variance, not a code regression.** 8 tasks ran in one
+  process on `45e0218`. Its `warden/fix`, `warden/llm`, `warden/plan` and implementer prompts are
+  byte-identical to pilot 2's `09f44fd` (same `prompt_hash 58fdd824ab34`). The last two (fromager,
+  coolamqp) ran in a second process at `66f8f84`, which also has `f114db8` (`read_file` takes
+  `end_line`). Main moved during the run (`c82cba5`, `1788e85` …), but neither process loaded those
+  commits. Turn-by-turn, pennylane (pilot 2: 10 turns, resolved; pilot 3: 40, not resolved) is the
+  same up to turn 8. At turn 9 Super `write_file`s a 309-byte fragment over the 19 kB `exp.py`.
+  The remaining turns go to recovery: 6 rejected `read_file{end_line: "500"}` calls, 5 reads past
+  EOF, `exp.py` read 22 times, then the fragment written again at turn 39. Across today's runs,
+  pennylane resolved 3 of 5 graded attempts and pamqp 3 of 4. 7 of 10 tasks hit the 40-turn
+  budget (pilot 2: 5). Per-task outcomes swing with sampling (implementer temperature 0.1, plus a
+  fresh Ultra plan each run).
+- **Spend: $2.40 for pilot 3** ($0.63 stopped 25-turn attempt + $1.78 for the 10 tasks,
+  $0.18/task). Within the $3.00 approved. **Day total $7.85.**
+
+### 1f. E1 prepared (2026-10-14): 50-task sample, bases checked, sharded runs, generated table
 
 - **Sample:** `evals/swe_rebench/e1/` (50 tasks, seed 7, no gold patch). It contains all 10
   pilot tasks: `random.sample` draws the same first 10 offsets for n=10 and n=50.
@@ -171,7 +223,7 @@ Same 10 tasks (`--seed 7`, cap $1/task, 40 turns) after `09f44fd` (old tool outp
 - **Report:** `uv run warden report evals/swe_rebench/e1/results.shard-*.csv --md --label E1`;
   add `--write-readme` to replace the table between the README's `results` markers.
 
-### 1f. D4 best-of-N smoke (2026-10-14): forks, ranking and summed cost confirmed
+### 1g. D4 best-of-N smoke (2026-10-14): forks, ranking and summed cost confirmed
 
 `warden eval --candidates 3`, 40 turns, on the two pilot-2 misjudgements (scratch dir
 `evals/swe_rebench/smoke-d4/`, not a headline result). Cap was $0.65/task to stay inside the

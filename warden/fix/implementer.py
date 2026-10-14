@@ -16,6 +16,8 @@ import json
 import posixpath
 import re
 import shlex
+from collections.abc import Callable
+from dataclasses import dataclass
 from fnmatch import fnmatch
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
@@ -24,7 +26,13 @@ from pydantic import ValidationError
 
 from warden.config import Role
 from warden.fix.nodes import test_nodes
-from warden.fix.tools import TOOL_SCHEMAS, ToolDispatcher, as_message, strict_schema
+from warden.fix.tools import (
+    TOOL_SCHEMAS,
+    ToolDispatcher,
+    as_message,
+    strict_schema,
+    tolerate_args,
+)
 from warden.llm.client import ChatResult
 from warden.llm.cost import usd_for
 from warden.runlog.events import EventLog
@@ -130,6 +138,7 @@ def build_messages(
     workdir: str = "/app",
     lint: str = "",
     variant: str = "",
+    read_cache: bool = True,
 ) -> list[dict[str, Any]]:
     tools = "\n".join(
         f"- {t['function']['name']} — {t['function']['description']}" for t in ALL_TOOLS
@@ -143,6 +152,12 @@ def build_messages(
             f"Before `finish`, run `{lint}` and fix everything it reports (unused variables "
             "included); the target repo's CI rejects any lint error.\n"
             if lint
+            else ""
+        )
+        + (
+            "Re-reading a file range you were already shown, unchanged, returns a short note "
+            "instead of the content: read once, then edit.\n"
+            if read_cache
             else ""
         )
         + f"Budget: {max_tool_turns} tool turns\n"
@@ -231,6 +246,93 @@ def _tool_message(tool_call_id: str, content: str) -> dict[str, Any]:
     return {"role": "tool", "tool_call_id": tool_call_id, "content": content}
 
 
+# ------------------------------------------------------------------ read-loop guards
+# Live evidence (icalendar#1928, run 20261014-123340-85cd): 26 of 40 turns re-read files the
+# model had already been shown, and it never reached the edit. Two guards, both config values:
+# a re-read of an unchanged range still visible in the history gets a short note instead of
+# the content, and a run of `idle_nudge_after` turns without write_file/run_shell gets a nudge.
+
+REREAD_MSG = (
+    "unchanged since turn {turn}: {path} lines {first}-{last} have not changed and that "
+    "read_file result is still in this conversation. You already have it — now write the test "
+    "or make the edit with write_file, or run the tests with run_shell."
+)
+RESENT_PREFIX = "[unchanged since turn {turn}; re-sent because that output was elided]\n"
+IDLE_NUDGE = (
+    "You have spent {idle} tool turns in a row reading and searching without write_file or "
+    "run_shell, and {left} of {budget} turns are left. You already have what you read; stop "
+    "re-reading. Next: write the failing test, make the edit (write_file), or run the tests "
+    "(run_shell)."
+)
+
+
+@dataclass(frozen=True)
+class _Served:
+    first: int
+    last: int
+    total: int
+    turn: int
+    msg: int  # index of its tool message in the loop's `messages`
+
+
+class ReadMemory:
+    """Line ranges read_file has shown the model, per file, since the file last changed.
+    `forget` on every write to the file; `forget(None)` after run_shell (it may write anything)."""
+
+    def __init__(self, root: str) -> None:
+        self._root = root
+        self._seen: dict[str, list[_Served]] = {}
+
+    def forget(self, path: str | None) -> None:
+        if path is None:
+            self._seen.clear()
+        else:
+            self._seen.pop(_norm(path, self._root), None)
+
+    def record(self, path: str, first: int, last: int, total: int, turn: int, msg: int) -> None:
+        self._seen.setdefault(_norm(path, self._root), []).append(
+            _Served(first, last, total, turn, msg)
+        )
+
+    def covering(
+        self, path: str, start: int, end: int | None, visible: Callable[[int], bool]
+    ) -> tuple[int, int, int] | None:
+        """`(turn, first, last)` when the visible servings together cover `start..end` (`end`
+        None: to the end of the file), with `turn` the latest serving used; None otherwise."""
+        spans = [s for s in self._seen.get(_norm(path, self._root), []) if visible(s.msg)]
+        if not spans:
+            return None
+        want = spans[-1].total if end is None else min(end, spans[-1].total)
+        if start > want:
+            return None  # past the end: let read_file report it
+        need, turn = start, 0
+        for s in sorted(spans, key=lambda s: s.first):
+            if s.first <= need <= s.last:
+                need, turn = s.last + 1, max(turn, s.turn)
+            if need > want:
+                return turn, start, want
+        return None
+
+
+def _visible(messages: list[dict[str, Any]], idx: int) -> bool:
+    """Will message `idx` still be sent whole by `compact_history` after one more tool result?"""
+    if len(messages[idx]["content"] or "") <= ELIDE_MIN:
+        return True
+    tool_idx = [i for i, m in enumerate(messages) if m["role"] == "tool"]
+    return idx in tool_idx[-(KEEP_RECENT - 1) :]
+
+
+def _read_range(args: Any) -> tuple[str, int, int | None] | None:
+    """`(path, start_line, end_line)` of a read_file call, tolerated as the dispatcher would."""
+    fixed = tolerate_args("read_file", args).args
+    if not isinstance(fixed, dict):
+        return None
+    path, start, end = fixed.get("path"), fixed.get("start_line", 1), fixed.get("end_line")
+    if not isinstance(path, str) or not path.strip() or not isinstance(start, int):
+        return None
+    return path, start, end if isinstance(end, int) else None
+
+
 def parse_finish(args: Any) -> FixReport | str:
     """The validated report, or the error text fed back to the model (no URLs)."""
     # The only handler in this module: a pure in-memory check of the model's arguments.
@@ -277,10 +379,13 @@ def run_implementer(
     lint: str = "",
     autofix: str = "",
     variant: str = "",
+    idle_nudge_after: int = 8,
+    read_cache: bool = True,
 ) -> Candidate:
     """Drive the implementer over `base` until `finish` or the tool-turn budget; return the
     Candidate whose `image_uuid` is the last checkpoint. A "turn" is one model action: a
-    dispatched call, a refused write, an invalid `finish` or an unroutable prose reply.
+    dispatched call, a refused write, a cached re-read, an invalid `finish` or an unroutable
+    prose reply. `idle_nudge_after` (0 = off) and `read_cache` are the read-loop guards.
     `variant` (best-of-N) is appended to the user message so candidates do not converge."""
     dispatch = dispatcher if dispatcher is not None else ToolDispatcher(log)
     hooks: Progress = progress if progress is not None else _NoProgress()
@@ -291,7 +396,13 @@ def run_implementer(
     prompt_text = PROMPT_PATH.read_text(encoding="utf-8")
     root = dispatch.cwd
     messages = build_messages(
-        prompt_text, plan, max_tool_turns, workdir=root, lint=lint, variant=variant
+        prompt_text,
+        plan,
+        max_tool_turns,
+        workdir=root,
+        lint=lint,
+        variant=variant,
+        read_cache=read_cache,
     )
     box = base
     turns = 0
@@ -301,6 +412,11 @@ def run_implementer(
     report: FixReport | None = None
     on_base: dict[str, bool] = {}
     base_tests: dict[str, set[str]] = {}  # test function names per test file on base
+    memory = ReadMemory(root)
+    idle = 0  # tool turns since the last write_file / run_shell
+
+    def visible(idx: int) -> bool:
+        return _visible(messages, idx)
 
     note(
         "start",
@@ -308,6 +424,8 @@ def run_implementer(
         issue=plan.issue,
         base=base.uuid,
         max_tool_turns=max_tool_turns,
+        idle_nudge_after=idle_nudge_after,
+        read_cache=read_cache,
     )
     while report is None and turns < max_tool_turns:
         res = llm.chat(Role.IMPLEMENTER, PHASE, compact_history(messages), tools=ALL_TOOLS)
@@ -334,7 +452,9 @@ def run_implementer(
             note("unroutable", content=(res.content or "")[:200])
             continue
         for call in calls:
-            cid, name, args = call["id"], call["name"], call["arguments"]
+            cid, name, raw = call["id"], call["name"], call["arguments"]
+            # what the dispatcher will act on (aliases, coercions); it gets `raw` and logs repairs
+            args = tolerate_args(name, raw).args
             if name == "finish":  # free: never dispatched, honoured even once the budget is spent
                 parsed = parse_finish(args)
                 if isinstance(parsed, FixReport):
@@ -373,12 +493,43 @@ def run_implementer(
                     base_file = _cat(base, path, root)
                     on_base[key] = base_file.ok
                     base_tests[key] = set(test_nodes(base_file.stdout)) if base_file.ok else set()
-            result = dispatch.dispatch(box, name, args)
+            wanted = _read_range(args) if read_cache and name == "read_file" else None
+            resent: tuple[int, int, int] | None = None
+            if wanted is not None:
+                rpath, rstart, rend = wanted
+                seen = memory.covering(rpath, rstart, rend, visible)
+                if seen is not None:
+                    turns += 1
+                    idle += 1
+                    since, first, last = seen
+                    messages.append(
+                        _tool_message(
+                            cid,
+                            REREAD_MSG.format(turn=since, path=rpath, first=first, last=last),
+                        )
+                    )
+                    note("reread", path=rpath, first=first, last=last, since_turn=since)
+                    hooks.step(f"read_file {rpath} → unchanged since turn {since}")
+                    continue
+                resent = memory.covering(rpath, rstart, rend, lambda _: True)
+            result = dispatch.dispatch(box, name, raw)
             box = result.box
             turns += 1
             hooks.step(_step_text(name, args, result.exit_code))
-            messages.append(as_message(result, cid))
+            message = as_message(result, cid)
+            if resent is not None and result.ok:
+                message["content"] = RESENT_PREFIX.format(turn=resent[0]) + message["content"]
+            messages.append(message)
+            mutating = name in ("write_file", "run_shell") and result.exit_code is not None
+            idle = 0 if mutating else idle + 1
+            if name == "run_shell" and result.exit_code is not None:
+                memory.forget(None)  # a command may have rewritten any file
+            if wanted is not None and result.ok and result.lines and result.total_lines is not None:
+                memory.record(
+                    wanted[0], *result.lines, result.total_lines, turns, len(messages) - 1
+                )
             if name == "write_file" and result.ok:
+                memory.forget(str(args["path"]))
                 path = str(args["path"])
                 first_write = path if first_write is None else first_write
                 key = _norm(path, root)
@@ -390,6 +541,19 @@ def run_implementer(
                         node = f"{key}::{name_}"
                         if name_ not in base_tests[key] and node not in tests_added:
                             tests_added.append(node)
+        # after the whole batch: a user message may not split tool_calls from their results
+        if (
+            report is None
+            and turns < max_tool_turns
+            and idle_nudge_after
+            and idle >= idle_nudge_after
+        ):
+            left = max(0, max_tool_turns - turns)
+            nudge = IDLE_NUDGE.format(idle=idle, left=left, budget=max_tool_turns)
+            messages.append({"role": "user", "content": nudge})
+            note("nudge", idle=idle, tool_turns=turns)
+            hooks.step(f"nudge: {idle} turns without an edit")
+            idle = 0
 
     if report is None:
         note("budget", tool_turns=turns)

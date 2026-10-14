@@ -38,6 +38,23 @@ def test_theater_check_detects_real_and_fake_tests(tmp_path: Path) -> None:
     assert theater_check(base, new).failed_on_base is False
 
 
+def test_theater_check_runs_the_new_tests_on_the_candidate_too(tmp_path: Path) -> None:
+    b = FakeBackend()
+    log = _log(tmp_path)
+    base = Box.from_ref(b, "base", log)
+    cand = Box.from_ref(b, "cand", log)
+    new = {"tests/test_new.py": b"..."}
+    b.images[base.uuid].test_results["tests/test_new.py"] = 1
+    b.images[cand.uuid].test_results["tests/test_new.py"] = 0  # the fix makes it pass
+    ok = theater_check(base, new, candidate=cand)
+    assert ok.failed_on_base is True and ok.candidate_outcomes == {}
+    assert ok.reasons == {"tests/test_new.py": "repro: fails on base, passes with the fix"}
+    b.images[cand.uuid].test_results["tests/test_new.py"] = 1  # still red with the fix
+    bad = theater_check(base, new, candidate=cand)
+    assert bad.failed_on_base is False and bad.invalid is True
+    assert bad.reasons["tests/test_new.py"].endswith("and still fails with the fix")
+
+
 def test_events_are_logged(tmp_path: Path) -> None:
     b = FakeBackend()
     log = _log(tmp_path)
@@ -175,3 +192,62 @@ def test_other_contree_errors_still_raise() -> None:
     backend = ContreeBackend.__new__(ContreeBackend)
     with pytest.raises(ValueError):
         backend.run(_Image(), shell="x", cwd="/", env=None, timeout=1, files=None, keep=False)
+
+
+class ApiStatusCodeError(Exception):  # stands in for contree_sdk's (never imported here)
+    def __init__(self, status: int) -> None:
+        super().__init__(f"status={status}")
+        self.status = status
+
+
+class _FlakyImage:
+    """wait() raises ApiStatusCodeError(status) `failures` times, then returns a result."""
+
+    def __init__(self, failures: int, status: int = 500) -> None:
+        self.failures, self.status, self.calls = failures, status, 0
+
+    def run(self, **kw: object) -> _FlakyImage:
+        return self
+
+    def wait(self) -> object:
+        self.calls += 1
+        if self.calls <= self.failures:
+            raise ApiStatusCodeError(self.status)
+
+        class _Res:
+            stdout, stderr, exit_code = b"ok\n", b"", 0
+
+        return _Res()
+
+
+def test_contree_5xx_is_retried(monkeypatch: pytest.MonkeyPatch) -> None:
+    # 2026-10-14 pilot 3: a 500 on GET /operations/{id} aborted coolamqp's whole task (ERROR row).
+    from warden.sandbox import box
+
+    monkeypatch.setattr(box.time, "sleep", lambda s: None)
+    backend = box.ContreeBackend.__new__(box.ContreeBackend)
+    image = _FlakyImage(failures=box.SERVER_ERROR_RETRIES)
+    out = backend.run(image, shell="x", cwd="/", env=None, timeout=1, files=None, keep=False)
+    assert out[:3] == ("ok\n", "", 0)
+    assert image.calls == box.SERVER_ERROR_RETRIES + 1
+
+
+def test_contree_5xx_raises_after_retries(monkeypatch: pytest.MonkeyPatch) -> None:
+    from warden.sandbox import box
+
+    monkeypatch.setattr(box.time, "sleep", lambda s: None)
+    backend = box.ContreeBackend.__new__(box.ContreeBackend)
+    image = _FlakyImage(failures=99)
+    with pytest.raises(ApiStatusCodeError):
+        backend.run(image, shell="x", cwd="/", env=None, timeout=1, files=None, keep=False)
+    assert image.calls == box.SERVER_ERROR_RETRIES + 1
+
+
+def test_contree_4xx_is_not_retried() -> None:
+    from warden.sandbox import box
+
+    backend = box.ContreeBackend.__new__(box.ContreeBackend)
+    image = _FlakyImage(failures=1, status=403)
+    with pytest.raises(ApiStatusCodeError):
+        backend.run(image, shell="x", cwd="/", env=None, timeout=1, files=None, keep=False)
+    assert image.calls == 1

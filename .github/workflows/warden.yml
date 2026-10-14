@@ -1,0 +1,36 @@
+# Label an issue `warden` → Warden opens a draft PR with the evidence table, or comments why not.
+# In your own repo, replace `uses: ./` with `uses: moiz-lakkadkutta/warden@<commit sha>` and drop
+# the checkout step if you have no warden.toml (see README, "Use it in your repo").
+name: warden
+on:
+  issues:
+    types: [labeled]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: warden-issue-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  fix:
+    # `issues` events run the default branch's workflow with this repo's secrets; no PR code is
+    # checked out. The action also requires the labeler to have write access.
+    if: github.event.label.name == 'warden' && !github.event.issue.pull_request
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./
+        with:
+          nebius-api-key: ${{ secrets.NEBIUS_API_KEY }}
+          nebius-project-id: ${{ secrets.NEBIUS_PROJECT_ID }}
+          tavily-api-key: ${{ secrets.TAVILY_API_KEY }}
+          base-image: ${{ vars.WARDEN_BASE_IMAGE }}
+          test-command: ${{ vars.WARDEN_TEST_CMD }}
+          max-usd: "2.0"

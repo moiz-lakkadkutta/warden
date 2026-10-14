@@ -2,6 +2,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 from typer.testing import CliRunner, Result
@@ -396,3 +397,108 @@ def test_provider_budget_error_is_a_clean_exit_4(
     assert "Token Factory budget exhausted" in res.stderr
     assert "Traceback" not in res.stderr
     assert "warden resume" in res.stderr or "run_id" in res.stderr
+
+
+# ------------------------------------------------------------- --no-pr / --stop-after / --repo
+CREDS = {"NEBIUS_API_KEY": "x", "CONTREE_BASE_URL": "http://c", "NEBIUS_PROJECT_ID": "p"}
+
+
+def test_no_pr_stops_after_verify(tmp_path: Path) -> None:
+    res = _invoke("run", "--demo", "--no-pr")
+    assert res.exit_code == 0, res.stderr
+    artifacts = tmp_path / "runs" / _run_id(res.stderr) / "artifacts"
+    assert (artifacts / "verdict.json").exists() and not (artifacts / "pr.json").exists()
+    assert "stopped after verify" in res.stderr
+    res = _invoke("run", "--demo", "--stop-after", "fix")
+    assert res.exit_code == 0, res.stderr
+    artifacts = tmp_path / "runs" / _run_id(res.stderr) / "artifacts"
+    assert (artifacts / "candidate.json").exists() and not (artifacts / "verdict.json").exists()
+
+
+@pytest.mark.parametrize(
+    "args",
+    [("--dry-run", "--no-pr"), ("--stop-after", "pr"), ("--no-pr", "--stop-after", "plan")],
+)
+def test_bad_or_conflicting_stops_are_usage_errors(args: tuple[str, ...]) -> None:
+    res = _invoke("run", "--demo", *args)
+    assert res.exit_code == 2, res.stderr
+    assert res.stderr.splitlines()[1].startswith("fix: ")
+
+
+def test_repo_must_be_owner_name() -> None:
+    res = _invoke("run", "--issue", "1", "--repo", "icalendar", env=CREDS)
+    assert res.exit_code == 2 and "is not owner/name" in res.stderr
+    res = _invoke("run", "--issue", "1", "--install-cmd", "pip install .", env=CREDS)
+    assert res.exit_code == 2 and "--install-cmd needs --repo" in res.stderr
+
+
+def test_run_repo_builds_the_base_and_resume_reuses_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import warden.pipeline as pipeline
+    import warden.sandbox.box as box_mod
+    import warden.sandbox.external as external
+    from tests.test_external import ICAL_PYPROJECT, SHA, RepoBackend
+
+    backend = RepoBackend({"pyproject.toml": ICAL_PYPROJECT})
+    monkeypatch.setattr(box_mod, "ContreeBackend", lambda *a: backend)
+    monkeypatch.setattr(
+        external, "remote_head", lambda repo: external.RepoHead(sha=SHA, branch="main")
+    )
+    seen: list[Any] = []
+
+    def fix(ctx: pipeline.StepContext, _plan: object) -> object:
+        seen.append(ctx.settings)
+        raise pipeline.NotReadyError("offline fix", fix="none")
+
+    monkeypatch.setattr(pipeline, "_live_fix", fix)
+    res = _invoke(
+        "run", "--issue", "1928", "--repo", "collective/icalendar", "--no-pr",
+        "--test-cmd", "python -m pytest -x", env=CREDS,
+    )  # fmt: skip
+    assert res.exit_code == 3, res.stderr
+    assert f"base: collective/icalendar@{SHA[:7]} (main)" in res.stderr
+    run_id = _run_id(res.stderr)
+    base = json.loads((tmp_path / "runs" / run_id / "base.json").read_text())
+    assert base["repo"] == "collective/icalendar" and base["sha"] == SHA
+    s = seen[-1]
+    assert (s.target_repo, s.base_image, s.workdir, s.gate_profile, s.shell_wrap) == (
+        "collective/icalendar", base["image"], "/src", "swe", "sh -c",
+    )  # fmt: skip
+    assert s.test_cmd == "python -m pytest -x" and s.base_branch == "main"
+    assert (tmp_path / "runs" / ".bases.json").exists()
+
+    n = len(backend.calls)
+    res = _invoke("resume", run_id, env=CREDS)
+    assert res.exit_code == 3, res.stderr
+    assert seen[-1].target_repo == "collective/icalendar"
+    assert seen[-1].base_image == base["image"] and seen[-1].test_cmd == "python -m pytest -x"
+    assert len(backend.calls) == n  # resume never rebuilds
+
+    res = _invoke("run", "--issue", "1928", "--repo", "collective/icalendar", env=CREDS)
+    assert "(cached)" in res.stderr and len(backend.calls) == n
+
+
+def test_run_repo_base_failure_exits_3_with_fix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import warden.sandbox.box as box_mod
+    import warden.sandbox.external as external
+    from tests.test_external import ICAL_PYPROJECT, SHA, RepoBackend
+
+    backend = RepoBackend({"pyproject.toml": ICAL_PYPROJECT}, install_rc=1)
+    monkeypatch.setattr(box_mod, "ContreeBackend", lambda *a: backend)
+    monkeypatch.setattr(
+        external, "remote_head", lambda repo: external.RepoHead(sha=SHA, branch="main")
+    )
+    res = _invoke("run", "--issue", "1", "--repo", "o/r", env=CREDS)
+    assert res.exit_code == 3, res.stderr
+    assert "install failed for o/r" in res.stderr and "fix: pass --install-cmd" in res.stderr
+    assert "Traceback" not in res.stderr
+
+
+def test_doctor_reports_the_new_settings(tmp_path: Path) -> None:
+    res = _invoke("doctor", env={"WARDEN_PR_TEMPLATE": str(tmp_path / "missing.md")})
+    assert "WARDEN_TEST_CMD" in res.stderr and "WARDEN_BASE_BRANCH (main)" in res.stderr
+    line = next(ln for ln in res.stderr.splitlines() if "WARDEN_PR_TEMPLATE" in ln)
+    assert "✗" in line and "point WARDEN_PR_TEMPLATE at a markdown file" in line

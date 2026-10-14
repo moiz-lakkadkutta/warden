@@ -12,15 +12,17 @@ from __future__ import annotations
 import re
 import shlex
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from warden.runlog.events import EventLog
 from warden.sandbox.box import TIMEOUT_EXIT, Box, RunResult
+from warden.verify.tail import keep_tail
 
 _SUMMARY = re.compile(r"(\d+) (passed|failed|errors?|skipped|xfailed|xpassed)")
-# pytest's final line: "===== 1 failed, 4 passed in 0.10s =====" or (-q) "5 passed in 0.10s"
-_SUMMARY_LINE = re.compile(r"^=+ .* =+$|\bin \d+\.\d+s\b")
+# pytest's final line: "===== 1 failed, 4 passed in 0.10s =====", (-q) "5 passed in 0.10s", or
+# "21314 passed, 42 skipped, 597 xfailed in 69s" (no fraction)
+_SUMMARY_LINE = re.compile(r"^=+ .* =+$|\bin \d+(?:\.\d+)?s\b")
 _TAIL = 2000
 
 
@@ -90,7 +92,15 @@ PROFILES: dict[str, GateCommands] = {
     "generic": DEFAULT_COMMANDS,
     "fabric": FABRIC_COMMANDS,
     "swe": SWE_COMMANDS,
+    # Any repo (the GitHub Action's default): only the repo's own test command, WARDEN_TEST_CMD.
+    "tests": SWE_COMMANDS,
 }
+
+
+def with_test_cmd(commands: GateCommands, test_cmd: str) -> GateCommands:
+    """`commands` with the suite step replaced by the repo's own test command (when set)."""
+    return replace(commands, suite=test_cmd) if test_cmd.strip() else commands
+
 
 # Check name -> the steps that make it up; a check whose steps are all "" is not run.
 CHECKS: dict[str, tuple[str, ...]] = {
@@ -165,7 +175,8 @@ class GateResult:
 
 
 def summary_line(stdout: str) -> str:
-    """The last line shaped like a pytest summary; "" when there is none."""
+    """The last line shaped like a pytest summary; "" when there is none. Searched from the end:
+    the summary is pytest's last line, and the suite runs under `keep_tail` so it survives."""
     for line in reversed(stdout.splitlines()):
         if _SUMMARY_LINE.search(line.strip()):
             return line
@@ -209,11 +220,13 @@ def run_gate(
     t0 = time.perf_counter()
     steps: list[GateStep] = []
 
-    def step(name: str, box: Box, shell: str, **kw: Any) -> RunResult:
+    def step(name: str, box: Box, shell: str, *, keep_end: bool = False, **kw: Any) -> RunResult:
+        """`keep_end`: keep the end of the output (the pytest summary) past the sandbox's cap."""
         if not shell:
             steps.append(GateStep(name, "", 0, 0, "", skipped=True))
             return RunResult("", "", 0, box, 0)
-        command = f"{wrap} {shlex.quote(shell)}" if wrap else shell
+        run = keep_tail(shell) if keep_end else shell
+        command = f"{wrap} {shlex.quote(run)}" if wrap else run
         res = box.run(command, cwd=cwd, **kw)
         tail = (res.stdout + res.stderr)[-_TAIL:]
         steps.append(GateStep(name, shell, res.exit_code, res.ms, tail))
@@ -225,7 +238,7 @@ def run_gate(
         return res.box
 
     c = commands
-    suite = step("suite", candidate, c.suite, keep=False, timeout=timeout)
+    suite = step("suite", candidate, c.suite, keep_end=True, keep=False, timeout=timeout)
     mypy = step("mypy", candidate, c.mypy, keep=False)
     ruff_check = step("ruff_check", candidate, c.ruff_check, keep=False)
     ruff_format = step("ruff_format", candidate, c.ruff_format, keep=False)
