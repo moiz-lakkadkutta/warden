@@ -32,6 +32,7 @@ app = typer.Typer(
 )
 
 PHASES = ("hunt", "plan", "fix", "verify", "pr")
+MIN_TOOL_TURNS = 40  # doctor warns below this: live fixes needed 52 (icalendar#1928)
 
 # NOTE: `typer.Exit` subclasses RuntimeError — never `except RuntimeError` / `except Exception`
 # around command bodies, or exits (and the cost cap) get swallowed.
@@ -157,7 +158,21 @@ def doctor(
             "set WARDEN_SPEC_CHECK=0 to skip the verifier's spec review (one Ultra call per issue)",
         )
     )
+    checks.append(
+        (
+            f"WARDEN_IDLE_NUDGE_AFTER ({s.idle_nudge_after or 'off'}), "
+            f"WARDEN_READ_CACHE ({'on' if s.read_cache else 'off'})",
+            True,
+            "implementer read-loop guards",
+        )
+    )
     checks.append((".env not tracked by git", not _env_tracked(), "git rm --cached .env"))
+    warnings: list[str] = []
+    if s.max_tool_turns < MIN_TOOL_TURNS:
+        warnings.append(
+            f"WARDEN_MAX_TOOL_TURNS={s.max_tool_turns} is below {MIN_TOOL_TURNS}: real fixes run "
+            "out of turns (icalendar#1928 needed 52) → set WARDEN_MAX_TOOL_TURNS=60 in .env"
+        )
 
     if live:
         checks.extend(_live_model_checks(s))
@@ -170,6 +185,8 @@ def doctor(
         if not ok:
             line += f"→ {fix}"
         _err(line)
+    for warning in warnings:  # advisory: never changes the exit code
+        _err(f"  {ui.paint('!', '33')} {warning}")
     _err("")
     _err("Model routing:")
     for role, model in s.routing_table():

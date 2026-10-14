@@ -413,6 +413,8 @@ def _live_fix(ctx: StepContext, plan: Plan) -> Candidate:
         ctx.log,
         dispatcher=dispatcher,
         max_tool_turns=s.max_tool_turns,
+        idle_nudge_after=s.idle_nudge_after,
+        read_cache=s.read_cache,
         progress=ctx.progress,
         lint=profile.lint,
         autofix=profile.autofix,

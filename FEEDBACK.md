@@ -119,6 +119,14 @@ Every entry: date · tool · what happened · numbers · what would have helped.
   and the run ended with no change ($0.084 implementer, $0.11 total). Warden now accepts `end_line`
   (f114db8). → document whether Token Factory honours `strict: true` on tool definitions for
   Nemotron, so schema-conformant arguments can be guaranteed instead of validated after the fact.
+- 2026-10-14 · tool calls · Nemotron 3 Super re-reads instead of editing: on icalendar#1928 (run
+  20261014-123340-85cd, 40-turn cap) 26 of 40 turns were read_file calls on 4 files it had already
+  been shown, often the same range twice (recur.py 237-260 at turns 31 and 40), and it never
+  wrote the fix. With a 60-turn cap (20261014-123938-6f4c) it finished, in 52 turns. Warden now
+  tolerates invented/mistyped arguments (drop, coerce, clamp; recorded on the event), answers an
+  unchanged re-read with a one-line note, and nudges after 8 turns without write_file/run_shell.
+  → a recommended sampling setup (or a "tool-use" system-prompt preset) for Super that curbs
+  repeated identical tool calls would help every agent built on it.
 - (fill in after Phase B3) Lightning as a tool router: turn count, wrong-tool rate.
 
 ## Nebius Serverless

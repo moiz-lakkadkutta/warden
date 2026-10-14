@@ -168,8 +168,9 @@ def test_unknown_tool(log: EventLog) -> None:
     ("name", "args", "needle"),
     [
         ("read_file", {}, "path"),
-        ("write_file", {"path": "a", "content": "b", "extra": 1}, "extra"),
-        ("run_shell", {"command": "ls", "timeout": 9999}, "timeout"),
+        ("write_file", {"path": "a", "extra": 1}, "content"),  # an extra never fills a gap
+        ("run_shell", {"command": "ls", "timeout": "soon"}, "timeout"),
+        ("read_file", {"path": None, "start_line": 3}, "path"),  # null for a required key
         ("read_file", "src/a.py", "invalid"),
         ("list_files", None, "invalid"),
     ],
@@ -282,7 +283,7 @@ def test_invalid_write_file_never_logs_content(log: EventLog) -> None:
     _, box, _ = _setup(log)
     secret = "SECRETSECRETSECRET" * 600  # ~10 KB
     res = ToolDispatcher(log).dispatch(
-        box, "write_file", {"path": "a.py", "content": secret, "extra": 1}
+        box, "write_file", {"path": "", "content": secret, "extra": 1}
     )
     assert res.ok is False and res.exit_code is None
     log.close()
@@ -293,7 +294,7 @@ def test_invalid_write_file_never_logs_content(log: EventLog) -> None:
     assert len(tool_lines[0]) < 1024
     args = json.loads(tool_lines[0])["data"]["args"]
     assert "content" not in args
-    assert args["bytes"] == len(secret) and args["path"] == "a.py" and args["extra"] == 1
+    assert args["bytes"] == len(secret) and args["path"] == "" and args["extra"] == 1
 
 
 def test_scrub_args_shapes() -> None:
@@ -443,6 +444,60 @@ def test_read_file_accepts_an_end_line_range(log: EventLog) -> None:
     assert null.output == "".join(lines[98:])
     past = d.dispatch(box, "read_file", {"path": "big.py", "start_line": 95, "end_line": 500})
     assert past.ok and past.output == "".join(lines[94:])
+
+
+# ------------------------------------------------------------------ tolerant arguments
+
+
+def test_unknown_and_mistyped_args_are_tolerated_and_recorded(log: EventLog) -> None:
+    # icalendar#1928 run 20261014-122844-b9ee: 9 of 25 turns burned on rejected arguments.
+    _, box, img = _setup(log)
+    lines = [f"row {i:03d}\n" for i in range(1, 101)]
+    img.files["/app/big.py"] = "".join(lines).encode()
+    d = ToolDispatcher(log)
+    res = d.dispatch(
+        box,
+        "read_file",
+        {"path": "big.py", "start_line": "40", "end_line": "42.0", "context": 3, "mode": "x"},
+    )
+    assert res.ok and res.output == "".join(lines[39:42])
+    assert res.lines == (40, 42) and res.total_lines == 100
+    shell = d.dispatch(box, "run_shell", {"command": "true", "timeout": 9999, "cwd": "/app"})
+    assert shell.ok
+    tool = [e for e in _events(log) if e.kind == "tool"]
+    first = tool[0].data
+    assert first["ok"] is True and "error" not in first
+    assert first["args"] == {"path": "big.py", "start_line": 40, "end_line": 42}
+    assert first["ignored_args"] == {"context": 3, "mode": "x"}
+    assert first["repaired_args"] == ["start_line: str→int", "end_line: str→int"]
+    second = tool[1].data
+    assert second["args"]["timeout"] == 600
+    assert second["ignored_args"] == {"cwd": "/app"}
+    assert second["repaired_args"] == ["timeout: 9999→600"]
+
+
+def test_aliases_and_nulls_for_defaulted_keys(log: EventLog) -> None:
+    backend, box, img = _setup(log)
+    img.files["/app/a.py"] = b"x = 1\n"
+    d = ToolDispatcher(log)
+    read = d.dispatch(box, "read_file", {"file_path": "a.py", "start_line": None})
+    assert read.ok and read.output == "x = 1\n"
+    wrote = d.dispatch(box, "write_file", {"file": "b.py", "contents": "y = 2\n"})
+    assert wrote.ok and backend.images[wrote.box.uuid].files["/app/b.py"] == b"y = 2\n"
+    both = d.dispatch(box, "read_file", {"path": "a.py", "file_path": "nope.py"})
+    assert both.ok and both.output == "x = 1\n"  # the declared key wins; the alias is ignored
+    events = [e.data for e in _events(log) if e.kind == "tool"]
+    assert events[0]["repaired_args"] == ["file_path→path", "start_line: null→default"]
+    assert events[1]["repaired_args"] == ["file→path", "contents→content"]
+    assert events[2]["ignored_args"] == {"file_path": "nope.py"}
+
+
+def test_clean_calls_carry_no_repair_fields(log: EventLog) -> None:
+    _, box, img = _setup(log)
+    img.files["/app/a.py"] = b"x\n"
+    ToolDispatcher(log).dispatch(box, "read_file", {"path": "a.py", "start_line": 1})
+    (event,) = [e.data for e in _events(log) if e.kind == "tool"]
+    assert "ignored_args" not in event and "repaired_args" not in event
 
 
 def test_grep_supports_alternation(log: EventLog) -> None:
