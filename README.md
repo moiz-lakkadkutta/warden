@@ -65,7 +65,8 @@ pass, and Warden never sees those tests.
 |---|---|
 | Resolved | **4 / 10** |
 | Verifier PASS that hidden tests reject (false PASS) | 3 of 5 PASS |
-| Verifier FAIL on a fix hidden tests accept (false FAIL) | 2 of 5 FAIL: one ran out of turns before writing a test, one test file hung |
+| Verifier FAIL on a fix hidden tests accept (false FAIL) | 1 of 5 FAIL (ran out of turns before writing a test) |
+| Unverified (FAIL only because the suite timed out) | 1 |
 | Theater catches (new test already passes on the unfixed base) | 1 |
 | Cost | **$0.13 / task**, $1.33 total |
 

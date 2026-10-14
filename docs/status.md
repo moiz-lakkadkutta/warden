@@ -150,7 +150,9 @@ Same 10 tasks (`--seed 7`, cap $1/task, 40 turns) after `09f44fd` (old tool outp
   no tests written; the leftover diff happens to pass. coolamqp: the new test sits in
   `tests/test_clustering/test_a.py`, which hangs (likely needs an AMQP broker) until the gate's
   1800 s timeout; 3885 s wall-clock for one task. Follow-up: a shorter suite timeout for the
-  `swe` profile, and a hung suite reported as inconclusive rather than red.
+  `swe` profile, and a hung suite reported as inconclusive rather than red. **Done:** `31bbb32`
+  (`Verdict.inconclusive`, still FAIL) and the eval's `false_fail` / `unverified` columns with a
+  600 s suite timeout; results.csv backfilled, so coolamqp now counts as unverified.
 - **Spend 2026-10-14: $5.45** in total ($4.12 before pilot 2 + $1.33).
 
 ### 1a. Earlier notes: blocked by Token Factory billing (resolved)

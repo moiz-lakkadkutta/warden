@@ -443,6 +443,7 @@ def verify_candidate(
     *,
     issue_number: int = 0,
     regression_cmd: str = "",
+    suite_timeout: int = 1800,
 ) -> Verdict:
     """Theater check on the base, the gate on the candidate, the regression check (when
     `regression_cmd` is set: the repo's own test command, `-rA` output), the spec review (when
@@ -487,7 +488,7 @@ def verify_candidate(
         commands=commands,
         cwd=s.workdir,
         wrap=s.shell_wrap,
-        timeout=1800,
+        timeout=suite_timeout,
     )
     ctx.log.artifact(
         "gate.txt",

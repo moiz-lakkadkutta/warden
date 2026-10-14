@@ -197,6 +197,21 @@ def test_false_pass_is_a_pass_verdict_the_hidden_tests_reject() -> None:
     assert not _row("FAIL", False).false_pass  # a FAIL on a bad fix is the verifier working
 
 
+def test_false_fail_excludes_an_inconclusive_fail() -> None:
+    assert _row("FAIL", True).false_fail
+    timed_out = _row("FAIL", True, inconclusive=True)
+    assert timed_out.unverified and not timed_out.false_fail
+    assert not _row("FAIL", False).false_fail and not _row("FAIL", False).unverified
+    assert not _row("PASS", True).false_fail
+
+
+def test_append_refuses_a_csv_with_other_columns(tmp_path: Path) -> None:
+    path = tmp_path / "results.csv"
+    path.write_text("task_id,resolved\nx,1\n")
+    with pytest.raises(ValueError, match="other columns"):
+        swe.append_row(path, _row("PASS", True))
+
+
 def test_theater_catch_only_when_new_tests_passed_on_base() -> None:
     assert _row("FAIL", False, theater_failed_on_base=False).theater_catch
     assert not _row("FAIL", False).theater_catch

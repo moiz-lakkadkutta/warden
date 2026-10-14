@@ -56,6 +56,9 @@ WRAPPER_SCRIPT = (
 PYTEST_SHIM = '#!/bin/sh\nexec python -m pytest "$@"\n'
 TEST_PATCH = "/tmp/warden-test.patch"
 GRADE_TIMEOUT = 1800
+# The candidate's suite is the new tests' own files: minutes, not half an hour. A file that hangs
+# (e.g. needs a broker) is an unverified FAIL either way; this bounds what it costs.
+SUITE_TIMEOUT = 600
 INSTALL_TIMEOUT = 900
 
 CSV_COLUMNS = (
@@ -63,6 +66,8 @@ CSV_COLUMNS = (
     "resolved",
     "verdict",
     "false_pass",
+    "false_fail",
+    "unverified",
     "theater_catch",
     "tool_turns",
     "usd",
@@ -311,6 +316,8 @@ class Row:
     resolved: bool
     verdict: str
     false_pass: bool
+    false_fail: bool
+    unverified: bool
     theater_catch: bool
     tool_turns: int
     usd: float
@@ -333,6 +340,7 @@ def make_row(
     theater_failed_on_base: bool,
     theater_inconclusive: bool,
     tool_turns: int,
+    inconclusive: bool = False,
     resolved: bool,
     usd: float,
     seconds: float,
@@ -342,6 +350,9 @@ def make_row(
         resolved=resolved,
         verdict=verdict,
         false_pass=verdict in ("PASS", "PASS_WITH_CONCERNS") and not resolved,
+        # FAIL because a check could not finish (suite timed out): not verified, not rejected.
+        false_fail=verdict == "FAIL" and resolved and not inconclusive,
+        unverified=verdict == "FAIL" and inconclusive,
         # Warden's own tests passed on the unfixed base: the theater check rejected them.
         theater_catch=tests_added > 0 and not theater_failed_on_base and not theater_inconclusive,
         tool_turns=tool_turns,
@@ -356,6 +367,8 @@ def error_row(task: Task, err: BaseException, *, usd: float, seconds: float) -> 
         resolved=False,
         verdict="ERROR",
         false_pass=False,
+        false_fail=False,
+        unverified=False,
         theater_catch=False,
         tool_turns=0,
         usd=round(usd, 4),
@@ -373,6 +386,11 @@ def done_ids(csv_path: Path) -> set[str]:
 
 def append_row(csv_path: Path, row: Row) -> None:
     new = not csv_path.exists()
+    if not new:
+        with csv_path.open(encoding="utf-8", newline="") as fh:
+            header = tuple(next(csv.reader(fh), ()))
+        if header != CSV_COLUMNS:
+            raise ValueError(f"{csv_path} has other columns ({', '.join(header)}); use a new --out")
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     with csv_path.open("a", encoding="utf-8", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=CSV_COLUMNS)
@@ -411,6 +429,7 @@ def run_task(task: Task, settings: Settings, *, progress: Any = None) -> Row:
                 cand,
                 replace(SWE_COMMANDS, suite=suite_command(task, cand.tests_added)),
                 regression_cmd=task.test_cmd,
+                suite_timeout=SUITE_TIMEOUT,
             ),
         )
         run_pipeline(
@@ -438,6 +457,7 @@ def run_task(task: Task, settings: Settings, *, progress: Any = None) -> Row:
             theater_failed_on_base=verdict.theater_failed_on_base,
             theater_inconclusive=verdict.theater_inconclusive,
             tool_turns=cand.tool_turns,
+            inconclusive=verdict.inconclusive,
             resolved=g.resolved,
             usd=_spent(log),
             seconds=time.perf_counter() - t0,
