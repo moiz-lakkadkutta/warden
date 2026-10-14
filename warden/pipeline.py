@@ -14,18 +14,18 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from warden.config import Settings
 from warden.runlog.events import EventLog
-from warden.schemas import Candidate, Phase, Plan, RunEvent, Verdict
+from warden.schemas import Candidate, CandidateSummary, Phase, Plan, RunEvent, Verdict
 
 if TYPE_CHECKING:
     from warden.hunt.issue import IssueText
-    from warden.sandbox.box import Box
     from warden.verify.gate import GateCommands
     from warden.verify.spec import SpecResult
 
@@ -99,6 +99,11 @@ class StepContext:
     requested_issue: int | None
     at_rev: str | None = None  # replay: plan/fix/verify against this commit, not HEAD
     issue: IssueText | None = None  # given issue text (eval tasks); None = fetch from GitHub
+    # best-of-N: this step runs for candidate `candidate` of `candidates` (0 of 1 = no best-of-N);
+    # `variant` is the note the machine hands the implementer so candidates differ
+    candidate: int = 0
+    candidates: int = 1
+    variant: str = ""
 
     def spent_usd(self) -> float:
         """Running total over events.jsonl (the log flushes per emit, so this session counts)."""
@@ -289,8 +294,13 @@ def _call(steps: Steps, phase: Phase, ctx: StepContext, outputs: dict[Phase, Any
     if phase == "plan":
         return steps.plan(ctx, outputs["hunt"])
     if phase == "fix":
+        if ctx.settings.candidates > 1:
+            return best_of_n(steps, ctx, outputs["plan"], ctx.settings.candidates)
         return steps.fix(ctx, outputs["plan"])
     if phase == "verify":
+        chosen = ctx.artifacts / BEST_OF_N
+        if chosen.exists():  # best-of-N verified every candidate already; this is the winner's
+            return Verdict.model_validate_json(chosen.read_text(encoding="utf-8"))
         return steps.verify(ctx, outputs["plan"], outputs["fix"])
     return steps.pr(ctx, outputs["hunt"], outputs["plan"], outputs["fix"], outputs["verify"])
 
@@ -312,6 +322,195 @@ def _result(
         "pr_url": outputs["pr"].url if "pr" in outputs else None,
         "resumed_from": start_after,
     }
+
+
+# ------------------------------------------------------------------------- best-of-N
+
+BEST_OF_N = "best_of_n.json"  # the winner's Verdict with every candidate listed
+TEMPERATURES = (0.1, 0.5, 0.8)  # candidate 1 keeps the single-run default; later ones reuse 0.8
+_TIERS = {"PASS": 0, "PASS_WITH_CONCERNS": 1, "FAIL": 2}
+RANK_RULE = (
+    "verdict (PASS > PASS_WITH_CONCERNS > inconclusive FAIL > FAIL), then a new test that failed "
+    "on the unfixed base, then fewer regressions + unmet spec behaviours, then fewer concerns, "
+    "then a smaller diff, then lower cost, then the earlier candidate"
+)
+_CRITERIA = (
+    "verdict",
+    "theater",
+    "regressions + unmet spec",
+    "concerns",
+    "diff size",
+    "cost",
+    "order",
+)
+
+
+def candidate_temperature(k: int) -> float:
+    return TEMPERATURES[min(max(k, 1), len(TEMPERATURES)) - 1]
+
+
+def rank_key(c: CandidateSummary) -> tuple[int, int, int, int, int, float, int]:
+    """Best-of-N order, lowest first (RANK_RULE). A skipped candidate sorts after every
+    verified one; an unmeasured diff after every measured one."""
+    if c.status != "verified" or c.decision is None:
+        tier = 9
+    else:
+        tier = _TIERS[c.decision] + (1 if c.decision == "FAIL" and not c.inconclusive else 0)
+    return (
+        tier,
+        0 if c.theater_failed_on_base else 1,
+        c.regressions + c.spec_unmet,
+        c.concerns,
+        c.diff_lines if c.diff_lines is not None else 10**9,
+        round(c.cost_usd, 4),
+        c.index,
+    )
+
+
+def _label(c: CandidateSummary) -> str:
+    if c.decision is None:
+        return "skipped"
+    return c.decision + (" (inconclusive)" if c.decision == "FAIL" and c.inconclusive else "")
+
+
+def why_chosen(winner: CandidateSummary, others: list[CandidateSummary]) -> str:
+    """The winner, then per other verified candidate the first rank criterion that separated
+    them, then which candidates never ran and why."""
+    wk = rank_key(winner)
+    parts: list[str] = []
+    for o in others:
+        if o.status != "verified":
+            continue
+        ok = rank_key(o)
+        i = next(i for i, (a, b) in enumerate(zip(wk, ok, strict=True)) if a != b)
+        if i == 0:
+            detail = f"{_label(winner)} vs {_label(o)}"
+        elif i == 1:
+            detail = "its new test fails on the unfixed base"
+        elif i == 4:
+            other = o.diff_lines if o.diff_lines is not None else "?"
+            detail = f"{winner.diff_lines} vs {other} lines"
+        elif i == 5:
+            detail = f"${winner.cost_usd:.2f} vs ${o.cost_usd:.2f}"
+        elif i == 6:
+            detail = "a tie; the earlier one"
+        else:
+            detail = f"{wk[i]} vs {ok[i]}"
+        parts.append(f"over #{o.index} on {_CRITERIA[i]} ({detail})")
+    skipped = [o for o in others if o.status != "verified"]
+    if skipped:
+        ids = ", ".join(f"#{o.index}" for o in skipped)
+        parts.append(f"{ids} not run ({skipped[0].skipped_because})")
+    head = f"candidate #{winner.index} ({_label(winner)})"
+    return head + (": " + "; ".join(parts) if parts else "")
+
+
+def _summary(k: int, cand: Candidate, verdict: Verdict, usd: float) -> CandidateSummary:
+    return CandidateSummary(
+        index=k,
+        image_uuid=cand.image_uuid,
+        decision=verdict.decision,
+        theater_failed_on_base=verdict.theater_failed_on_base,
+        inconclusive=verdict.inconclusive,
+        regressions=len(verdict.regressions),
+        spec_unmet=len(verdict.spec_unmet),
+        concerns=len(verdict.concerns),
+        diff_lines=verdict.diff_lines,
+        cost_usd=round(usd, 6),
+        tool_turns=cand.tool_turns,
+        tests_added=len(cand.tests_added),
+        reasons=verdict.reasons[:6],
+    )
+
+
+def candidate_note(k: int, n: int, earlier: list[CandidateSummary]) -> str:
+    """The implementer's note for candidate k > 1: who it is and how earlier ones were judged,
+    so it does not repeat their approach. Candidate 1 gets none (the single-run prompt)."""
+    if k <= 1:
+        return ""
+    lines = [
+        f"Note: you are candidate {k} of {n} for this issue, on your own fork of the unfixed "
+        "code. The verifier judged the earlier candidates:"
+    ]
+    for c in earlier:
+        lines.append(f"- #{c.index}: {_label(c)}: {'; '.join(c.reasons[:3]) or 'no reasons'}")
+    lines.append(
+        "Take a different approach where they fell short, and re-check the plan's assumptions "
+        "in the code before following it."
+    )
+    return "\n".join(lines)
+
+
+def best_of_n(steps: Steps, ctx: StepContext, plan: Plan, n: int) -> Candidate:
+    """Fix + verify up to `n` candidates, each forked from the same base, one after another;
+    return the best by `rank_key` and write its Verdict, every candidate listed, to BEST_OF_N.
+
+    Each candidate's events carry `candidate: k`; its artifacts land in artifacts/candidate-<k>/
+    and the winner's are copied up. Early stop: once a candidate is a clean PASS (PASS, and a new
+    test failed on the unfixed base) the rest are skipped: only a smaller diff could outrank it.
+    Budget: a candidate is skipped when the spend so far plus the costliest candidate so far
+    would pass the per-issue cap. The cap itself (CostMeter, fed by events.jsonl) covers every
+    candidate combined and is never caught."""
+    done: list[CandidateSummary] = []
+    pairs: dict[int, tuple[Candidate, Verdict]] = {}
+    costliest = 0.0
+    skip = ""
+    cap = ctx.settings.max_usd_per_issue
+    for k in range(1, n + 1):
+        last = done[-1] if done else None
+        if not skip and last and last.decision == "PASS" and last.theater_failed_on_base:
+            skip = f"early stop: #{last.index} is a clean PASS"
+        if not skip and last and ctx.spent_usd() + costliest > cap:
+            skip = (
+                f"budget: ${ctx.spent_usd():.2f} spent + ${costliest:.2f} for a candidate "
+                f"> ${cap:.2f} cap"
+            )
+        if skip:
+            done.append(CandidateSummary(index=k, status="skipped", skipped_because=skip))
+            ctx.log.emit("fix", "note", {"text": f"candidate {k}/{n} skipped: {skip}"})
+            continue
+        sub = replace(
+            ctx,
+            log=ctx.log.tagged(candidate=k),
+            candidate=k,
+            candidates=n,
+            variant=candidate_note(k, n, done),
+        )
+        sub.log.emit("fix", "note", {"text": f"candidate {k}/{n}: a fork of the base"})
+        ctx.progress.step(f"candidate {k}/{n}")
+        before = ctx.spent_usd()
+        cand = steps.fix(sub, plan)
+        verdict = steps.verify(sub, plan, cand)
+        usd = ctx.spent_usd() - before
+        costliest = max(costliest, usd)
+        pairs[k] = (cand, verdict)
+        done.append(_summary(k, cand, verdict, usd))
+        ctx.progress.step(f"candidate {k}/{n}: {verdict.decision} (${usd:.2f})")
+
+    winner = min(done, key=rank_key)
+    why = why_chosen(winner, [c for c in done if c.index != winner.index])
+    cand, verdict = pairs[winner.index]
+    for f in sorted((ctx.artifacts / f"candidate-{winner.index}").glob("*")):
+        if f.is_file():
+            shutil.copyfile(f, ctx.artifacts / f.name)
+    final = verdict.model_copy(
+        update={"candidates": done, "chosen": winner.index, "chosen_why": why}
+    )
+    _write_atomic(ctx.artifacts / BEST_OF_N, final.model_dump_json(indent=2))
+    ctx.log.emit(
+        "verify",
+        "note",
+        {
+            "text": f"best of {n}: {why}",
+            "best_of_n": n,
+            "chosen": winner.index,
+            "candidates": [
+                {"index": c.index, "status": c.status, "decision": c.decision} for c in done
+            ],
+        },
+    )
+    ctx.progress.step(f"chose {why}")
+    return cand
 
 
 # ------------------------------------------------------------------------------ live
@@ -403,7 +602,13 @@ def _live_fix(ctx: StepContext, plan: Plan) -> Candidate:
 
     s = ctx.settings
     base = _base_box(ctx, "fix")
-    llm = LLM(s, CostMeter(cap_usd=s.max_usd_per_issue - ctx.spent_usd()), ctx.log)
+    # best-of-N candidates differ by temperature and by the machine's note (candidate 1 = default)
+    llm = LLM(
+        s,
+        CostMeter(cap_usd=s.max_usd_per_issue - ctx.spent_usd()),
+        ctx.log,
+        temperature=candidate_temperature(ctx.candidate),
+    )
     dispatcher = ToolDispatcher(ctx.log, cwd=s.workdir, shell_wrap=s.shell_wrap)
     profile = PROFILES[s.gate_profile]
     cand = run_implementer(
@@ -416,6 +621,7 @@ def _live_fix(ctx: StepContext, plan: Plan) -> Candidate:
         progress=ctx.progress,
         lint=profile.lint,
         autofix=profile.autofix,
+        variant=ctx.variant,
     )
     ctx.progress.step(
         f"{'done' if cand.done else 'blocked'} in {cand.tool_turns} turns, "
@@ -511,13 +717,25 @@ def verify_candidate(
             ctx.log.artifact(
                 "regression.txt", f"files: {' '.join(regression.files)}\n\n{regression.output}"
             )
-    spec = _spec_check(ctx, candidate, cand, issue_number) if s.spec_check else None
+    shown = candidate.run("git add -A -N . && git diff HEAD", cwd=s.workdir, keep=False)
+    diff = shown.stdout
+    spec = _spec_check(ctx, diff, cand, issue_number) if s.spec_check else None
     verdict = decide(cand, theater, gate, regression=regression, spec=spec)
+    verdict = verdict.model_copy(update={"diff_lines": diff_lines(diff) if shown.ok else None})
     ctx.progress.step(f"verdict: {verdict.decision}")
     return verdict
 
 
-def _spec_check(ctx: StepContext, candidate: Box, cand: Candidate, issue_number: int) -> SpecResult:
+def diff_lines(diff: str) -> int:
+    """Lines added + removed in a unified diff (file headers not counted)."""
+    return sum(
+        1
+        for line in diff.splitlines()
+        if line[:1] in "+-" and line[:1] and not line.startswith(("+++", "---"))
+    )
+
+
+def _spec_check(ctx: StepContext, diff: str, cand: Candidate, issue_number: int) -> SpecResult:
     """One VERDICT call: the candidate diff against the issue's stated behaviours. Comments are
     never sent (on a replay they hold the human plan)."""
     from warden.hunt.issue import fetch_issue
@@ -527,7 +745,6 @@ def _spec_check(ctx: StepContext, candidate: Box, cand: Candidate, issue_number:
 
     s = ctx.settings
     issue = ctx.issue or fetch_issue(s.target_repo, issue_number, include_comments=False)
-    diff = candidate.run("git add -A -N . && git diff HEAD", cwd=s.workdir, keep=False).stdout
     llm = LLM(s, CostMeter(cap_usd=s.max_usd_per_issue - ctx.spent_usd()), ctx.log)
     spec = spec_review(llm, issue, diff=diff, tests=cand.tests_added, system=_prompt("spec.md"))
     ctx.log.artifact("spec.json", spec.review.model_dump_json(indent=2))

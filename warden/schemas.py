@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, SerializerFunctionWrapHandler, model_serializer
 
 Axis = Literal["race", "idor", "money", "malformed", "flow"]
 Severity = Literal["P0", "P1", "P2", "P3"]
@@ -124,6 +124,44 @@ class Verdict(BaseModel):
     spec_unmet: list[str] = Field(default_factory=list)
     # FAIL only because a check could not finish (suite timed out): unverified, not rejected
     inconclusive: bool = False
+    # lines added + removed in the candidate's diff (None: not measured); a best-of-N tiebreak
+    diff_lines: int | None = None
+    # best-of-N (WARDEN_CANDIDATES > 1): every candidate, the chosen index and why
+    candidates: list[CandidateSummary] = Field(default_factory=list)
+    chosen: int | None = None
+    chosen_why: str = ""
+
+    @model_serializer(mode="wrap")
+    def _omit_unset_extras(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        """The fields added for best-of-N are left out while unset, so a single-candidate
+        verdict.json is byte-identical to one written before they existed."""
+        data: dict[str, Any] = handler(self)
+        for key, empty in (("diff_lines", None), ("candidates", []), ("chosen", None)):
+            if data.get(key) == empty:
+                data.pop(key, None)
+        if not data.get("chosen_why"):
+            data.pop("chosen_why", None)
+        return data
+
+
+class CandidateSummary(BaseModel):
+    """One best-of-N candidate as the verifier saw it (pipeline.rank_key orders them)."""
+
+    index: int = Field(description="1-based candidate number")
+    status: Literal["verified", "skipped"] = "verified"
+    skipped_because: str = ""
+    image_uuid: str = ""
+    decision: Decision | None = None
+    theater_failed_on_base: bool = False
+    inconclusive: bool = False
+    regressions: int = 0
+    spec_unmet: int = 0
+    concerns: int = 0
+    diff_lines: int | None = None
+    cost_usd: float = 0.0
+    tool_turns: int = 0
+    tests_added: int = 0
+    reasons: list[str] = Field(default_factory=list)
 
 
 class SpecBehaviour(BaseModel):

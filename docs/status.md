@@ -171,6 +171,27 @@ Same 10 tasks (`--seed 7`, cap $1/task, 40 turns) after `09f44fd` (old tool outp
 - **Report:** `uv run warden report evals/swe_rebench/e1/results.shard-*.csv --md --label E1`;
   add `--write-readme` to replace the table between the README's `results` markers.
 
+### 1f. D4 best-of-N smoke (2026-10-14): forks, ranking and summed cost confirmed
+
+`warden eval --candidates 3`, 40 turns, on the two pilot-2 misjudgements (scratch dir
+`evals/swe_rebench/smoke-d4/`, not a headline result). Cap was $0.65/task to stay inside the
+smoke's $2 (an earlier 25-turn attempt was stopped at $0.57).
+
+| task | #1 | #2 | #3 | chosen | resolved | $ |
+|---|---|---|---|---|---|---|
+| gmr__pamqp-52 | FAIL, 10 regressions, hidden ✓ | FAIL, 29 regressions, hidden ✗ | skipped (budget) | #1 | ✓ | 0.60 |
+| python-wheel-build__fromager-352 | clean PASS, hidden ✗ | skipped (early stop) | skipped | #1 | ✗ (false PASS) | 0.07 |
+
+- All three candidates forked the same base checkpoint (the earlier attempt reached #3: three children of
+  one uuid). Cost per candidate is in events (`candidate` tag), and the cap covered the sum.
+- The ranking chose the candidate that resolves on pamqp: both were FAIL (out of turns, no
+  test), and fewer regressions decided it.
+- Early stop cannot fix a false PASS: on fromager #1 was a clean PASS that the hidden tests
+  reject, so #2 and #3 never ran. Best-of-N helps the FAIL side (false FAIL, out-of-turns) and
+  not the false-PASS side until the verifier itself improves.
+- The budget skip uses the costliest candidate so far as the estimate: at $0.65 cap a $0.33
+  candidate leaves room for 1-2. For N=3 use `--max-usd 1.5`.
+
 ### 1a. Earlier notes: blocked by Token Factory billing (resolved)
 
 `warden run --issue 196 --at 43f3851^ --yes` (run `20261010-111217-7c89`) fetched the issue, then

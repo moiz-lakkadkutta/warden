@@ -244,6 +244,19 @@ def test_doctor_no_color() -> None:
     assert "Model routing" in res.stderr
 
 
+def test_doctor_checks_warden_candidates() -> None:
+    bad = _invoke("doctor", env={"WARDEN_CANDIDATES": "0"})
+    assert "WARDEN_CANDIDATES (0)" in bad.stderr and "set WARDEN_CANDIDATES to 1-8" in bad.stderr
+    good = _invoke("doctor", env={"WARDEN_CANDIDATES": "3"})
+    line = next(ln for ln in good.stderr.splitlines() if "WARDEN_CANDIDATES (3)" in ln)
+    assert "→" not in line
+
+
+def test_eval_candidates_option_is_bounded() -> None:
+    assert _invoke("eval", "--candidates", "0", "--yes").exit_code == 2
+    assert "--candidates" in _invoke("eval", "--help").stdout
+
+
 # ----------------------------------------------------------------------------- B6: resume
 
 

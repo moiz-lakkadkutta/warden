@@ -54,6 +54,25 @@ Inconclusive results (collection errors, timeouts, unquotable claims) are concer
 Checks a repo cannot run are listed as **not verified**, never shown as green. Money / tax /
 schema / security changes are labelled `PENDING-HUMAN`. Warden never merges.
 
+**Best-of-N** (`WARDEN_CANDIDATES=N`, `warden eval --candidates N`; default 1). After one plan,
+the implementer runs up to N times, each candidate on its own fork of the same base checkpoint,
+and every candidate goes through all four checks above. Candidates run one after another and
+differ by temperature (0.1, 0.5, 0.8) and by a note telling candidate k how the verifier judged
+the earlier ones. The verifier then picks one by a fixed rule, first difference wins:
+
+1. verdict: PASS > PASS WITH CONCERNS > FAIL only because a check could not finish > FAIL
+2. a new test that fails on the unfixed base (theater check) beats one that did not
+3. fewer regressions + unmet spec behaviours, then fewer concerns
+4. smaller diff (lines added + removed), then lower cost, then the earlier candidate
+
+A clean PASS (PASS with a theater-proven test) stops the run early: later candidates are skipped,
+since only a smaller diff could outrank it. (The catch: a false PASS stops the run too, so
+best-of-N rescues runs that end in FAIL, not the verifier's own false PASSes.) A candidate is also skipped when the spend so far plus
+the costliest candidate so far would pass the per-issue cap; the cap covers all candidates
+together and is never caught. `verdict.json` lists every candidate with its verdict and why the
+winner won; the PR evidence table says "chosen from N candidates"; every event carries its
+`candidate` index, so the console draws one branch per candidate.
+
 ## Results
 
 SWE-rebench pilot, 10 tasks (`warden eval --n 10 --seed 7`, $1/task cap, 40 tool turns). Every

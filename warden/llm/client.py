@@ -54,8 +54,11 @@ class ChatResult:
 class LLM:
     """One instance per run. Every call is metered and logged."""
 
-    def __init__(self, settings: Settings, meter: CostMeter, log: EventLog) -> None:
+    def __init__(
+        self, settings: Settings, meter: CostMeter, log: EventLog, *, temperature: float = 0.1
+    ) -> None:
         self._s = settings
+        self.temperature = temperature  # best-of-N candidates differ by this
         self._meter = meter
         self._log = log
         if meter.log is None:
@@ -81,12 +84,13 @@ class LLM:
         *,
         response_format: dict[str, Any] | None = None,
         tools: list[dict[str, Any]] | None = None,
-        temperature: float = 0.1,
+        temperature: float | None = None,
         max_tokens: int | None = None,
     ) -> ChatResult:
         model = self._s.model_for(role)
         self._meter.check(phase)
-        kwargs: dict[str, Any] = {"model": model, "messages": messages, "temperature": temperature}
+        temp = self.temperature if temperature is None else temperature
+        kwargs: dict[str, Any] = {"model": model, "messages": messages, "temperature": temp}
         budget = max_tokens if max_tokens is not None else MAX_TOKENS.get(role)
         if budget is not None:
             kwargs["max_tokens"] = budget

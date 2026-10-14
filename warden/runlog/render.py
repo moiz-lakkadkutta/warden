@@ -52,6 +52,7 @@ class Edge:
     shell: str
     exit_code: int
     ms: int
+    candidate: int | None = None  # best-of-N tag on the event
 
 
 @dataclass(frozen=True)
@@ -105,8 +106,10 @@ def build_tree(events: list[RunEvent]) -> BranchTree:
         shell = str(d.get("shell") or "")
         code = _int(d.get("exit_code"))
         ms = ev.ms or 0
+        tag = d.get("candidate")
         if to and to != frm:
-            edges.append(Edge(frm, to, ev.phase, shell, code, ms))
+            cand = tag if isinstance(tag, int) else None
+            edges.append(Edge(frm, to, ev.phase, shell, code, ms, cand))
         else:
             runs.append(NodeRun(frm, ev.phase, shell, code, ms))
 
@@ -378,10 +381,53 @@ def _exit_text(run: NodeRun | None) -> str:
     return "passed (exit 0)" if run.exit_code == 0 else f"failed (exit {run.exit_code})"
 
 
+def best_of_n_choice(events: list[RunEvent]) -> tuple[int | None, dict[int, str]]:
+    """(chosen index, {index: decision or 'skipped'}) from the best-of-N note; (None, {}) when
+    the run had one candidate."""
+    for ev in reversed(events):
+        if ev.kind == "note" and "best_of_n" in ev.data:
+            chosen = ev.data.get("chosen")
+            each = {
+                int(c["index"]): str(c.get("decision") or c.get("status") or "")
+                for c in ev.data.get("candidates", [])
+            }
+            return (chosen if isinstance(chosen, int) else None), each
+    return None, {}
+
+
+def _candidate_cards(tree: BranchTree, events: list[RunEvent]) -> list[str]:
+    """Best-of-N: one card per candidate (the leaf of its fix lineage), the chosen one marked."""
+    chosen, each = best_of_n_choice(events)
+    leaves: dict[int, str] = {}
+    for e in tree.edges:
+        if e.phase == "fix" and e.candidate is not None:
+            leaves[e.candidate] = e.child
+    cards = []
+    for k in sorted(set(leaves) | set(each)):
+        node = leaves.get(k)
+        run = tree.test_run(node) if node else None
+        decision = each.get(k, "")
+        cls = "edge ok" if decision.startswith("PASS") else "edge fail" if decision else "edge none"
+        status = (decision.replace("_", " ") or "not verified") + (
+            " · chosen" if k == chosen else ""
+        )
+        cards.append(_edge_card(f"candidate #{k}", node, run, cls, status))
+    return cards
+
+
 def _tree(events: list[RunEvent], rows: list[tuple[str, str]]) -> str:
     tree = build_tree(events)
     row = {c: _plain(r) for c, r in rows}
     cards: list[str] = []
+    if any(e.candidate is not None for e in tree.edges):
+        cards = _candidate_cards(tree, events)
+        base_id = _e(tree.base) if tree.base else "—"
+        base_card = (
+            f'<div class="node"><div class="label">base</div><div class="id">{base_id}</div></div>'
+        )
+        return (
+            f'<section id="tree">{base_card}<div class="branches">{"".join(cards)}</div></section>'
+        )
 
     # candidate: leaf of the fix lineage (never chosen by exit code)
     run = tree.test_run(tree.candidate) if tree.candidate else None
@@ -439,6 +485,16 @@ def _evidence(verdict: str | None, rows: list[tuple[str, str]]) -> str:
 
 
 def _log_row(ev: RunEvent) -> str:
+    row = _log_row_body(ev)
+    k = ev.data.get("candidate")
+    if isinstance(k, int):  # best-of-N: say which candidate's branch this line is on
+        return row.replace("<div class='ev", f"<div data-candidate='{k}' class='ev", 1).replace(
+            "'>", f"'><span class='num'>#{k}</span> ", 1
+        )
+    return row
+
+
+def _log_row_body(ev: RunEvent) -> str:
     d = ev.data
     if ev.kind == "sandbox":
         return (

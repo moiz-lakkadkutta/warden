@@ -238,7 +238,7 @@ Exit: first `PASS` verdict with all evidence rows on a real, open Fabric issue.
 | D1 | `integrate/waves.py`: parse each Plan's `files_to_touch` + functions (via `grep -n "def "` in the box) → conflict graph → waves; ≤1 migration per wave | wave plan printed for 6 issues matches what you'd do by hand |
 | D2 | `integrate/merger.py`: `integration = integration.run("git merge --no-ff fix/N")`; on conflict → FAIL that issue, continue | 3-issue wave merges cleanly; next wave forks the updated image |
 | D3 | `eval/swe_rebench.py`: for each task id → `sdk.images.use(<preloaded image>)` → plan → fix → verify → run task's hidden tests | 10 tasks complete; `results.csv` has columns `task_id, resolved, verdict, false_pass, theater_catch, tool_turns, usd, seconds` |
-| D4 | Decision Oct 10: best-of-N (`WARDEN_CANDIDATES=3`, verifier ranks) | in only if D1–D3 done by Oct 9 |
+| D4 | best-of-N: `WARDEN_CANDIDATES=N` (eval: `--candidates N`), each candidate on its own fork of the base, verified, ranked by the rule in README "How the verifier decides" | `results.csv` has `candidates, chosen, resolved_candidates`; verdict.json lists every candidate and why the winner won |
 
 Exit: `results.csv` with 10 rows; wave integration works.
 

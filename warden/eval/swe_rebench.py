@@ -75,7 +75,13 @@ CSV_COLUMNS = (
     "usd",
     "seconds",
     "error",
+    # best-of-N (D4): N asked for (some may be skipped), the one graded, and each candidate the
+    # hidden tests accept (";"-joined): did the verifier's ranking pick a resolving one?
+    "candidates",
+    "chosen",
+    "resolved_candidates",
 )
+LEGACY_COLUMNS = CSV_COLUMNS[: CSV_COLUMNS.index("candidates")]  # results.csv before D4
 
 _DIFF_HEADER = re.compile(r"^diff --git a/(\S+) b/(\S+)$", re.MULTILINE)
 _STATUSES = ("PASSED", "FAILED", "ERROR", "SKIPPED", "XFAIL", "XPASS")
@@ -353,6 +359,9 @@ class Row:
     usd: float
     seconds: int
     error: str = ""
+    candidates: int = 1
+    chosen: int = 1  # 0: no candidate (an ERROR row)
+    resolved_candidates: str = ""  # best-of-N only: "1;3" = candidates #1 and #3 resolve
 
     def csv(self) -> dict[str, str]:
         d = asdict(self)
@@ -374,6 +383,9 @@ def make_row(
     resolved: bool,
     usd: float,
     seconds: float,
+    candidates: int = 1,
+    chosen: int = 1,
+    resolved_candidates: str = "",
 ) -> Row:
     return Row(
         task_id=task.instance_id,
@@ -388,6 +400,9 @@ def make_row(
         tool_turns=tool_turns,
         usd=round(usd, 4),
         seconds=int(seconds),
+        candidates=candidates,
+        chosen=chosen,
+        resolved_candidates=resolved_candidates,
     )
 
 
@@ -404,6 +419,7 @@ def error_row(task: Task, err: BaseException, *, usd: float, seconds: float) -> 
         usd=round(usd, 4),
         seconds=int(seconds),
         error=f"{type(err).__name__}: {str(err)[:200]}".replace("\n", " "),
+        chosen=0,
     )
 
 
@@ -415,11 +431,15 @@ def done_ids(csv_path: Path) -> set[str]:
 
 
 def append_row(csv_path: Path, row: Row) -> None:
+    """Append one row; a pre-D4 results.csv is first rewritten with the new columns (its rows
+    were single-candidate runs: candidates 1, chosen 1, or 0 for an ERROR row)."""
     new = not csv_path.exists()
     if not new:
         with csv_path.open(encoding="utf-8", newline="") as fh:
             header = tuple(next(csv.reader(fh), ()))
-        if header != CSV_COLUMNS:
+        if header == LEGACY_COLUMNS:
+            _upgrade_csv(csv_path)
+        elif header != CSV_COLUMNS:
             raise ValueError(f"{csv_path} has other columns ({', '.join(header)}); use a new --out")
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     with csv_path.open("a", encoding="utf-8", newline="") as fh:
@@ -427,6 +447,19 @@ def append_row(csv_path: Path, row: Row) -> None:
         if new:
             w.writeheader()
         w.writerow(row.csv())
+
+
+def _upgrade_csv(csv_path: Path) -> None:
+    with csv_path.open(encoding="utf-8", newline="") as fh:
+        old = list(csv.DictReader(fh))
+    tmp = csv_path.with_name(csv_path.name + ".tmp")
+    with tmp.open("w", encoding="utf-8", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=CSV_COLUMNS)
+        w.writeheader()
+        for r in old:
+            chosen = "0" if r.get("verdict") == "ERROR" else "1"
+            w.writerow({**r, "candidates": "1", "chosen": chosen, "resolved_candidates": ""})
+    tmp.replace(csv_path)
 
 
 # --------------------------------------------------------------------------- loop
@@ -480,6 +513,15 @@ def run_task(task: Task, settings: Settings, *, progress: Any = None) -> Row:
         log.artifact("grade.txt", f"$ {grade_command(task)}\n\n{g.output}")
         summary = {k: v for k, v in asdict(g).items() if k != "output"}
         log.emit("verify", "note", {"grade": summary, "task": task.instance_id})
+        resolving = [verdict.chosen] if g.resolved and verdict.chosen else []
+        for c in verdict.candidates:  # best-of-N: grade the others too, to judge the ranking
+            if c.index == verdict.chosen or c.status != "verified":
+                continue
+            other = grade(base.sibling(c.image_uuid), task)
+            data = {"grade": {"resolved": other.resolved}, "task": task.instance_id}
+            log.emit("verify", "note", {**data, "candidate": c.index})
+            if other.resolved:
+                resolving.append(c.index)
         return make_row(
             task,
             verdict=verdict.decision,
@@ -491,6 +533,11 @@ def run_task(task: Task, settings: Settings, *, progress: Any = None) -> Row:
             resolved=g.resolved,
             usd=_spent(log),
             seconds=time.perf_counter() - t0,
+            candidates=len(verdict.candidates) or 1,
+            chosen=verdict.chosen or 1,
+            resolved_candidates=";".join(str(i) for i in sorted(resolving))
+            if verdict.candidates
+            else "",
         )
     except ProviderBudgetError:
         raise

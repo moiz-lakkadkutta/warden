@@ -5,6 +5,7 @@ The console renders these files; the CLI's --json mode streams the same events t
 
 from __future__ import annotations
 
+import copy
 import json
 import secrets
 import sys
@@ -30,6 +31,18 @@ class EventLog:
         self._events = (self.dir / "events.jsonl").open("a", encoding="utf-8")
         self._cost = (self.dir / "cost.jsonl").open("a", encoding="utf-8")
         self._json_stream = json_stream
+        self.tags: dict[str, Any] = {}
+        self._artifacts = self.dir / "artifacts"
+
+    def tagged(self, *, candidate: int) -> EventLog:
+        """A view on the same files whose events carry `candidate: k` (best-of-N) and whose
+        artifacts land in artifacts/candidate-<k>/, so N verifications never overwrite each
+        other. The view shares the open files: close the parent, not the view."""
+        view = copy.copy(self)
+        view.tags = {**self.tags, "candidate": candidate}
+        view._artifacts = self.dir / "artifacts" / f"candidate-{candidate}"
+        view._artifacts.mkdir(parents=True, exist_ok=True)
+        return view
 
     def emit(
         self,
@@ -40,7 +53,8 @@ class EventLog:
         ms: int | None = None,
         usd: float | None = None,
     ) -> RunEvent:
-        ev = RunEvent(phase=phase, kind=kind, data=data or {}, ms=ms, usd=usd)  # type: ignore[arg-type]
+        payload = {**(data or {}), **self.tags} if self.tags else data or {}
+        ev = RunEvent(phase=phase, kind=kind, data=payload, ms=ms, usd=usd)  # type: ignore[arg-type]
         line = ev.model_dump_json()
         self._events.write(line + "\n")
         self._events.flush()
@@ -58,7 +72,7 @@ class EventLog:
         self.emit(phase, "note", {"text": text})
 
     def artifact(self, name: str, content: str | bytes) -> Path:
-        path = self.dir / "artifacts" / name
+        path = self._artifacts / name
         if isinstance(content, str):
             path.write_text(content, encoding="utf-8")
         else:

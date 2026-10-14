@@ -15,6 +15,8 @@ from typing import Any
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+MAX_CANDIDATES = 8  # best-of-N upper bound (doctor checks WARDEN_CANDIDATES against it)
+
 
 class Role(StrEnum):
     PLANNER = "planner"
@@ -69,6 +71,8 @@ class Settings(BaseSettings):
         default="moiz-lakkadkutta/Fabric-Inventory", alias="WARDEN_TARGET_REPO"
     )
     runs_dir: Path = Field(default=Path("runs"), alias="WARDEN_RUNS_DIR")
+    # Best-of-N: implementer runs per issue, each on its own fork of the base, verifier ranks
+    candidates: int = Field(default=1, alias="WARDEN_CANDIDATES")
     # Verifier's spec review: one VERDICT call comparing the diff with the issue's stated behaviours
     spec_check: bool = Field(default=True, alias="WARDEN_SPEC_CHECK")
 
