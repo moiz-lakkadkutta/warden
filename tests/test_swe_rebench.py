@@ -306,3 +306,47 @@ def test_prepare_base_reinstalls_the_package_from_testbed(log: EventLog) -> None
     assert multi.install == "for d in a b; do (cd $d; pip install --no-deps -e .); done"
     bare = swe.Task.from_row({**ROW, "install_config": {}})
     assert bare.install == ""
+
+
+def test_best_of_n_columns_default_to_one_candidate(tmp_path: Path) -> None:
+    path = tmp_path / "results.csv"
+    swe.append_row(path, _row("PASS", True, candidates=3, chosen=2, resolved_candidates="2;3"))
+    swe.append_row(path, _row("FAIL", False))
+    err = swe.error_row(swe.Task.from_row(ROW), ValueError("x"), usd=0, seconds=1)
+    swe.append_row(path, err)
+    with path.open(newline="") as fh:
+        rows = list(csv.DictReader(fh))
+    assert [(r["candidates"], r["chosen"], r["resolved_candidates"]) for r in rows] == [
+        ("3", "2", "2;3"),
+        ("1", "1", ""),
+        ("1", "0", ""),
+    ]
+
+
+def test_a_pre_d4_csv_is_upgraded_in_place_and_keeps_its_rows(tmp_path: Path) -> None:
+    path = tmp_path / "results.csv"
+    with path.open("w", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=swe.LEGACY_COLUMNS)
+        w.writeheader()
+        old = {k: v for k, v in _row("PASS", True).csv().items() if k in swe.LEGACY_COLUMNS}
+        w.writerow({**old, "task_id": "old__one"})
+        w.writerow({**old, "task_id": "old__err", "verdict": "ERROR"})
+    assert swe.done_ids(path) == {"old__one", "old__err"}  # old csvs still load
+    swe.append_row(path, _row("PASS", True, candidates=3, chosen=1))
+    with path.open(newline="") as fh:
+        rows = list(csv.DictReader(fh))
+    assert tuple(rows[0]) == swe.CSV_COLUMNS
+    assert [(r["task_id"], r["candidates"], r["chosen"]) for r in rows] == [
+        ("old__one", "1", "1"),
+        ("old__err", "1", "0"),
+        (ROW["instance_id"], "3", "1"),
+    ]
+    assert rows[0]["usd"] == "0.1235"
+
+
+def test_the_committed_results_csv_still_loads() -> None:
+    path = Path(__file__).resolve().parents[1] / "evals" / "swe_rebench" / "results.csv"
+    with path.open(newline="") as fh:
+        header = tuple(next(csv.reader(fh)))
+    assert header in (swe.LEGACY_COLUMNS, swe.CSV_COLUMNS)
+    assert swe.done_ids(path)

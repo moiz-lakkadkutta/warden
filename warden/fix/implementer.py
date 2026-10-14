@@ -123,7 +123,13 @@ def removed_tests(before: str, after: str) -> list[str]:
 
 
 def build_messages(
-    prompt_text: str, plan: Plan, max_tool_turns: int, *, workdir: str = "/app", lint: str = ""
+    prompt_text: str,
+    plan: Plan,
+    max_tool_turns: int,
+    *,
+    workdir: str = "/app",
+    lint: str = "",
+    variant: str = "",
 ) -> list[dict[str, Any]]:
     tools = "\n".join(
         f"- {t['function']['name']} — {t['function']['description']}" for t in ALL_TOOLS
@@ -155,6 +161,7 @@ def build_messages(
             block("Landing order", plan.landing_order),
             block("Citations", [f"{c.url} — {c.claim}" for c in plan.citations]),
             f"Acceptance:\n{acceptance}",
+            *([variant] if variant else []),
         ]
     )
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
@@ -269,10 +276,12 @@ def run_implementer(
     progress: Progress | None = None,
     lint: str = "",
     autofix: str = "",
+    variant: str = "",
 ) -> Candidate:
     """Drive the implementer over `base` until `finish` or the tool-turn budget; return the
     Candidate whose `image_uuid` is the last checkpoint. A "turn" is one model action: a
-    dispatched call, a refused write, an invalid `finish` or an unroutable prose reply."""
+    dispatched call, a refused write, an invalid `finish` or an unroutable prose reply.
+    `variant` (best-of-N) is appended to the user message so candidates do not converge."""
     dispatch = dispatcher if dispatcher is not None else ToolDispatcher(log)
     hooks: Progress = progress if progress is not None else _NoProgress()
 
@@ -281,7 +290,9 @@ def run_implementer(
 
     prompt_text = PROMPT_PATH.read_text(encoding="utf-8")
     root = dispatch.cwd
-    messages = build_messages(prompt_text, plan, max_tool_turns, workdir=root, lint=lint)
+    messages = build_messages(
+        prompt_text, plan, max_tool_turns, workdir=root, lint=lint, variant=variant
+    )
     box = base
     turns = 0
     tests_added: list[str] = []

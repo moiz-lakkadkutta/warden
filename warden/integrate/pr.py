@@ -169,6 +169,16 @@ def confirm_pr(
     return False
 
 
+def best_of_n_cell(verdict: Verdict) -> str:
+    """'#2 chosen from 3 candidates (#1 FAIL · #2 PASS · #3 skipped): <why>' (one table cell)."""
+    each = " · ".join(
+        f"#{c.index} {c.decision.replace('_', ' ') if c.decision else 'skipped'}"
+        for c in verdict.candidates
+    )
+    why = verdict.chosen_why.replace("|", "/")
+    return f"#{verdict.chosen} chosen from {len(verdict.candidates)} candidates ({each}): {why}"
+
+
 def evidence_table(
     issue: int,
     title: str,
@@ -238,6 +248,7 @@ def evidence_table(
         f"| Gate | {gate} |",
         f"| Not verified | {not_verified} |",
         f"| Risk class | {risk_cell} |",
+        *([f"| Best-of-N | {best_of_n_cell(verdict)} |"] if verdict.candidates else []),
         f"| Cost | ${cost_usd:.2f} · {calls} |",
     ]
     if verdict.concerns:

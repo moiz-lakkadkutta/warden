@@ -96,7 +96,7 @@ def doctor(
     ] = False,
 ) -> None:
     """Check local tools, credentials and (optionally) model reachability. No network by default."""
-    from warden.config import load_settings
+    from warden.config import MAX_CANDIDATES, load_settings
 
     print("warden doctor", file=sys.stderr)
     s = load_settings()
@@ -155,6 +155,13 @@ def doctor(
             f"WARDEN_SPEC_CHECK ({'on' if s.spec_check else 'off'})",
             True,
             "set WARDEN_SPEC_CHECK=0 to skip the verifier's spec review (one Ultra call per issue)",
+        )
+    )
+    checks.append(
+        (
+            f"WARDEN_CANDIDATES ({s.candidates})",
+            1 <= s.candidates <= MAX_CANDIDATES,
+            f"set WARDEN_CANDIDATES to 1-{MAX_CANDIDATES} (1 = one implementer run per issue)",
         )
     )
     checks.append((".env not tracked by git", not _env_tracked(), "git rm --cached .env"))
@@ -368,6 +375,15 @@ def eval_swe(
         float, typer.Option(help="Stop before a task that could take total spend over this (USD).")
     ] = 5.0,
     max_usd: Annotated[float | None, typer.Option(help="Override the per-task cost cap.")] = None,
+    candidates: Annotated[
+        int | None,
+        typer.Option(
+            min=1,
+            max=8,
+            help="Best-of-N: implementer candidates per task (overrides WARDEN_CANDIDATES); "
+            "the per-task cap covers all of them.",
+        ),
+    ] = None,
     out: Annotated[
         Path, typer.Option(help="Directory for tasks.jsonl, task_ids.txt, results.csv.")
     ] = Path("evals/swe_rebench"),
@@ -383,6 +399,8 @@ def eval_swe(
     s = load_settings()
     if max_usd is not None:
         s.max_usd_per_issue = max_usd
+    if candidates is not None:
+        s.candidates = candidates
     missing = s.missing_for("NEBIUS_API_KEY", "CONTREE_BASE_URL", "NEBIUS_PROJECT_ID")
     if missing:
         fail(f"missing {', '.join(missing)}", fix="run `warden doctor`", code=2)
@@ -397,7 +415,8 @@ def eval_swe(
     todo = [t for t in tasks if t.instance_id not in swe.done_ids(csv_path)]
     _err(
         f"{len(todo)} of {len(tasks)} tasks to run · budget ${budget:.2f} · "
-        f"cap ${s.max_usd_per_issue:.2f}/task · results → {csv_path}"
+        f"cap ${s.max_usd_per_issue:.2f}/task · {s.candidates} candidate(s)/task · "
+        f"results → {csv_path}"
     )
     if not todo:
         raise typer.Exit(0)
@@ -407,6 +426,9 @@ def eval_swe(
     def show(row: swe.Row) -> None:
         mark = "✓" if row.resolved else "✗"
         extra = f"  {row.error}" if row.error else ""
+        if row.candidates > 1:
+            picked = row.resolved_candidates or "none"
+            extra += f"  #{row.chosen} of {row.candidates} (hidden tests accept: {picked})"
         _err(
             f"{mark} {row.task_id}  {row.verdict}  ${row.usd:.2f}  {row.seconds}s"
             f"{'  FALSE PASS' if row.false_pass else ''}{extra}"
