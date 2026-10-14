@@ -372,14 +372,28 @@ def eval_swe(
         Path, typer.Option(help="Directory for tasks.jsonl, task_ids.txt, results.csv.")
     ] = Path("evals/swe_rebench"),
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Start without asking.")] = False,
+    shard: Annotated[
+        str | None,
+        typer.Option(
+            help="Run only shard i of k (tasks at index ≡ i mod k) into results.shard-i.csv; "
+            "start k processes on one committed tasks.jsonl. --budget is per shard."
+        ),
+    ] = None,
 ) -> None:
     """SWE-rebench on Nebius preloaded images: plan → fix → verify → hidden tests → results.csv.
 
-    Tasks already in results.csv are skipped, so re-running the same command resumes."""
+    Tasks already in results.csv are skipped, so re-running the same command resumes. Tasks in
+    the out dir's excluded.txt (bases that cannot be graded) are not run."""
     from warden.config import load_settings
+    from warden.eval import shard as sh
     from warden.eval import swe_rebench as swe
+    from warden.eval.bases import read_excluded
     from warden.runlog.events import EventLog
 
+    try:
+        part = sh.parse_shard(shard) if shard is not None else None
+    except ValueError as e:
+        fail(str(e), fix="e.g. --shard 0/5 … --shard 4/5", code=2)
     s = load_settings()
     if max_usd is not None:
         s.max_usd_per_issue = max_usd
@@ -387,13 +401,21 @@ def eval_swe(
     if missing:
         fail(f"missing {', '.join(missing)}", fix="run `warden doctor`", code=2)
     tasks_path = out / "tasks.jsonl"
+    if part is not None and not tasks_path.exists():  # k shards must share one sampled list
+        fail(
+            f"no {tasks_path}", fix="sample first: warden eval --out DIR --n N (no --shard)", code=2
+        )
     if tasks_path.exists():
         tasks = swe.load_tasks(tasks_path)
     else:
         _err(f"sampling {n} tasks from {swe.DATASET} ({swe.SPLIT}, seed {seed})")
         tasks = swe.fetch_sample(tasks_path, n, seed=seed)
         (out / "task_ids.txt").write_text("\n".join(t.instance_id for t in tasks) + "\n")
-    csv_path = out / "results.csv"
+    if part is not None:
+        tasks = sh.take(tasks, *part)
+    skip = read_excluded(out / "excluded.txt")
+    tasks = [t for t in tasks if t.instance_id not in skip]
+    csv_path = out / sh.csv_name(part)
     todo = [t for t in tasks if t.instance_id not in swe.done_ids(csv_path)]
     _err(
         f"{len(todo)} of {len(tasks)} tasks to run · budget ${budget:.2f} · "
@@ -412,7 +434,7 @@ def eval_swe(
             f"{'  FALSE PASS' if row.false_pass else ''}{extra}"
         )
 
-    log = EventLog(s.runs_dir, "eval")
+    log = EventLog(s.runs_dir, "eval" if part is None else f"eval-shard-{part[0]}")
     with _guarded(log):
         rows = swe.run_eval(todo, s, csv_path=csv_path, budget_usd=budget, on_row=show)
     resolved = sum(r.resolved for r in rows)
@@ -501,6 +523,47 @@ def console(
         run_id = runs[-1]
     out = render_run(s.runs_dir, run_id)
     print(out)
+
+
+# ---------------------------------------------------------------------------- report
+@app.command()
+def report(
+    csvs: Annotated[
+        list[Path], typer.Argument(help="results CSVs (shards are merged, one row per task).")
+    ],
+    md: Annotated[bool, typer.Option("--md", help="Print the markdown table, not JSON.")] = False,
+    label: Annotated[str, typer.Option(help="Column header of the markdown table.")] = "results",
+    excluded: Annotated[
+        Path | None,
+        typer.Option(help="Tasks to report but not count (default: excluded.txt beside the CSV)."),
+    ] = None,
+    write_readme: Annotated[
+        bool,
+        typer.Option("--write-readme", help="Replace the table between the README's markers."),
+    ] = False,
+    readme: Annotated[Path, typer.Option(help="README to update.")] = Path("README.md"),
+) -> None:
+    """Metrics from eval results: resolved (95% CI), verifier precision, false PASS/FAIL, $/task."""
+    from warden.eval import report as rep
+
+    missing = [p for p in csvs if not p.exists()]
+    if missing:
+        fail(f"no such file: {missing[0]}", fix="pass the eval's results*.csv", code=2)
+    if excluded is None and (csvs[0].parent / "excluded.txt").exists():
+        excluded = csvs[0].parent / "excluded.txt"
+    skip = rep.read_excluded(excluded) if excluded is not None else {}
+    m = rep.compute(rep.read_results(csvs), excluded=skip)
+    table = rep.markdown(m, label=label)
+    if write_readme:
+        try:
+            readme.write_text(rep.replace_block(readme.read_text("utf-8"), table), "utf-8")
+        except ValueError as e:
+            fail(str(e), fix=f"add {rep.START} / {rep.END} around the Results table", code=2)
+        _err(f"wrote {readme} ({m.resolved}/{m.n} resolved)")
+    if md:
+        sys.stdout.write(table)
+    elif not write_readme:
+        print(json.dumps(m.as_dict(), indent=2))
 
 
 if __name__ == "__main__":

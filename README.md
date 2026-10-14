@@ -61,6 +61,7 @@ row is in [`evals/swe_rebench/results.csv`](evals/swe_rebench/results.csv); the 
 [`task_ids.txt`](evals/swe_rebench/task_ids.txt). "Resolved" means the dataset's hidden tests
 pass, and Warden never sees those tests.
 
+<!-- results:start -->
 | metric | pilot 2 (2026-10-14) |
 |---|---|
 | Resolved | **4 / 10** |
@@ -69,6 +70,7 @@ pass, and Warden never sees those tests.
 | Unverified (FAIL only because the suite timed out) | 1 |
 | Theater catches (new test already passes on the unfixed base) | 1 |
 | Cost | **$0.13 / task**, $1.33 total |
+<!-- results:end -->
 
 Pilot 2 ran *before* the regression check and spec review existed. All three false PASSes came
 from the implementer fixing its own reading of the issue, which is the failure those two checks
