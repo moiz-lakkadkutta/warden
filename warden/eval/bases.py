@@ -13,6 +13,7 @@ The gold patch is fetched in memory from the dataset for this check and never wr
 from __future__ import annotations
 
 import csv
+import re
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -156,6 +157,42 @@ def write_outputs(out_dir: Path, checks: list[BaseCheck]) -> None:
     (out_dir / "excluded.txt").write_text("".join(f"{x}\n" for x in lines), encoding="utf-8")
 
 
+_BASE_P2P = re.compile(r"^base F2P \d+/\d+ P2P (\d+)/(\d+)")
+
+
+def read_checks(path: Path) -> list[BaseCheck]:
+    """bases.csv → checks (P2P-on-base read back from the note); a missing file is none."""
+    if not path.exists():
+        return []
+
+    def b(v: str) -> bool | None:
+        return None if v == "" else v == "1"
+
+    out = []
+    with path.open(encoding="utf-8", newline="") as fh:
+        for r in csv.DictReader(fh):
+            m = _BASE_P2P.match(r["note"])
+            out.append(
+                BaseCheck(
+                    task_id=r["task_id"],
+                    image_ok=r["image_ok"] == "1",
+                    base_unresolved=b(r["base_unresolved"]),
+                    gold_resolved=b(r["gold_resolved"]),
+                    seconds=int(r["seconds"] or 0),
+                    note=r["note"],
+                    p2p_red_on_base=bool(m and int(m.group(1)) < int(m.group(2))),
+                )
+            )
+    return out
+
+
+def merge_checks(old: list[BaseCheck], new: list[BaseCheck]) -> list[BaseCheck]:
+    """`new` replaces `old` by task id, in `old`'s order; unseen ids go last."""
+    fresh = {c.task_id: c for c in new}
+    merged = [fresh.pop(c.task_id, c) for c in old]
+    return merged + [c for c in new if c.task_id in fresh]
+
+
 def read_excluded(path: Path) -> dict[str, str]:
     """`excluded.txt` → {task_id: reason}; a missing file is no exclusions."""
     if not path.exists():
@@ -207,13 +244,17 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--gold", action="store_true", help="also check the gold patch resolves")
     p.add_argument("--seed", type=int, default=7, help="the seed the sample was drawn with")
     p.add_argument("--workers", type=int, default=4)
+    p.add_argument("--only", nargs="+", default=None, help="re-check these ids; merge")
     args = p.parse_args(argv)
 
     tasks = swe.load_tasks(args.out / "tasks.jsonl")
+    sample = len(tasks)
+    if args.only:
+        tasks = [t for t in tasks if t.instance_id in set(args.only)]
     gold: dict[str, str] = {}
     if args.gold:
         print(f"fetching {len(tasks)} gold patches (memory only)", file=sys.stderr)
-        gold = gold_patches(len(tasks), seed=args.seed)
+        gold = gold_patches(sample, seed=args.seed)
         missing = {t.instance_id for t in tasks} - set(gold)
         if missing:
             print(f"gold rows differ from tasks.jsonl: {sorted(missing)}", file=sys.stderr)
@@ -233,6 +274,8 @@ def main(argv: list[str] | None = None) -> int:
         return c
 
     checks = run_checks(tasks, check, workers=args.workers)
+    if args.only:
+        checks = merge_checks(read_checks(args.out / "bases.csv"), checks)
     write_outputs(args.out, checks)
     bad = [c for c in checks if c.excluded_reason]
     print(f"{len(checks) - len(bad)}/{len(checks)} bases ok; {len(bad)} excluded", file=sys.stderr)

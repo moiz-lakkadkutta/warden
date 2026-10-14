@@ -55,6 +55,8 @@ WRAPPER_SCRIPT = (
 # `python -m pytest` can). Every pytest call goes through the env's python instead.
 PYTEST_SHIM = '#!/bin/sh\nexec python -m pytest "$@"\n'
 TEST_PATCH = "/tmp/warden-test.patch"
+GRADE_LOG = "/tmp/warden-grade.log"
+GRADE_CHUNK = 60_000  # bytes per read-back; sandbox stdout is cut at 65,535
 GRADE_TIMEOUT = 1800
 # The candidate's suite is the new tests' own files: minutes, not half an hour. A file that hangs
 # (e.g. needs a broker) is an unverified FAIL either way; this bounds what it costs.
@@ -77,6 +79,11 @@ CSV_COLUMNS = (
 
 _DIFF_HEADER = re.compile(r"^diff --git a/(\S+) b/(\S+)$", re.MULTILINE)
 _STATUSES = ("PASSED", "FAILED", "ERROR", "SKIPPED", "XFAIL", "XPASS")
+# Fixtures a test patch may touch (SWE-bench's NON_TEST_EXTS): reset and applied, never handed to
+# the test command (pytest fails the whole run on a .yaml path: "ERROR: not found").
+NON_TEST_EXTS = (
+    ".json", ".png", "csv", ".txt", ".md", ".jpg", ".jpeg", ".pkl", ".yml", ".yaml", ".toml"
+)  # fmt: skip
 
 
 class Task(BaseModel):
@@ -261,7 +268,8 @@ def grade_command(task: Task) -> str:
         q = shlex.quote(f)
         parts.append(f"{{ git checkout -q {task.base_commit} -- {q} 2>/dev/null || rm -f {q}; }}")
     parts.append(f"git apply {TEST_PATCH}")
-    parts.append(f"{task.test_cmd} {' '.join(shlex.quote(f) for f in files)}")
+    tests = [f for f in files if not f.endswith(NON_TEST_EXTS)]
+    parts.append(f"{task.test_cmd} {' '.join(shlex.quote(f) for f in tests)}")
     return " && ".join(parts)
 
 
@@ -287,14 +295,21 @@ class Grade:
 
 
 def grade(candidate: Box, task: Task) -> Grade:
+    """Sandbox stdout stops at 64 KiB (coverahealth__dataspec-30: 672 P2P ids), so the run writes
+    its log into a kept checkpoint and the status lines are read back in chunks."""
     res = candidate.run(
-        f"{WRAP} {shlex.quote(grade_command(task))}",
+        f"{WRAP} {shlex.quote(grade_command(task))} > {GRADE_LOG} 2>&1",
         cwd=WORKDIR,
-        keep=False,
+        keep=True,
         timeout=GRADE_TIMEOUT,
         files={TEST_PATCH: task.test_patch.encode()},
     )
-    outcomes = parse_test_lines(res.stdout)
+    if res.box is None:  # timed out: no checkpoint, nothing to read back
+        status, output = res.stdout, res.stdout + res.stderr
+    else:
+        status = _status_lines(res.box)
+        output = res.box.run(f"tail -c 4000 {GRADE_LOG}", cwd=WORKDIR, keep=False).stdout
+    outcomes = parse_test_lines(status)
     f2p = sum(outcomes.get(t) == "passed" for t in task.fail_to_pass)
     p2p = sum(outcomes.get(t) == "passed" for t in task.pass_to_pass)
     return Grade(
@@ -303,8 +318,23 @@ def grade(candidate: Box, task: Task) -> Grade:
         p2p_passed=p2p,
         exit_code=res.exit_code,
         applied=bool(outcomes) or res.exit_code in (0, 1),
-        output=(res.stdout + res.stderr)[-4000:],
+        output=output[-4000:],
     )
+
+
+def _status_lines(box: Box) -> str:
+    """`STATUS id` for every summary line of the grade log, read GRADE_CHUNK bytes at a time."""
+    pick = f"grep -E '^({'|'.join(_STATUSES)}) ' {GRADE_LOG} | cut -d' ' -f1,2"
+    chunks: list[str] = []
+    off = 1
+    while True:
+        part = box.run(
+            f"{pick} | tail -c +{off} | head -c {GRADE_CHUNK}", cwd=WORKDIR, keep=False
+        ).stdout
+        chunks.append(part)
+        if len(part.encode()) < GRADE_CHUNK:
+            return "".join(chunks)
+        off += GRADE_CHUNK
 
 
 # --------------------------------------------------------------------------- results

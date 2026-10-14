@@ -136,3 +136,14 @@ def test_run_checks_keeps_task_order_with_parallel_workers() -> None:
 
     out = bases.run_checks(tasks, check, workers=3)
     assert [c.task_id for c in out] == [t.instance_id for t in tasks]
+
+
+def test_read_checks_round_trips_and_merge_replaces_by_id(tmp_path: Path) -> None:
+    a = bases.BaseCheck("a__b-1", True, True, None, 3, "base F2P 0/1 P2P 1/2", True)
+    b = bases.BaseCheck("c__d-2", False, None, None, 1, "LookupError: x")
+    bases.write_outputs(tmp_path, [a, b])
+    back = bases.read_checks(tmp_path / "bases.csv")
+    assert back == [a, b] and back[0].excluded_reason.startswith("P2P")
+    fixed = bases.BaseCheck("a__b-1", True, True, True, 4, "base F2P 0/1 P2P 2/2; gold ...")
+    new = bases.BaseCheck("e__f-3", True, True, True, 4, "")
+    assert bases.merge_checks(back, [new, fixed]) == [fixed, b, new]
