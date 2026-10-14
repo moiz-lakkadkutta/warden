@@ -353,9 +353,13 @@ def _base_box(ctx: StepContext, phase: Phase) -> Any:
 
 
 def _live_hunt(ctx: StepContext) -> IssueRef:
-    """For `--issue N`: fetch the issue (the Hunter proper lands in C5)."""
+    """For `--issue N`: fetch the issue (the Hunter proper lands in C5). With `--from-event` the
+    issue text came from the GitHub event payload: no `gh` call, and no comments."""
     from warden.hunt.issue import fetch_issue
 
+    if ctx.issue is not None:
+        ctx.progress.step(f"#{ctx.issue.number} {ctx.issue.title}")
+        return IssueRef(issue=ctx.issue.number, title=ctx.issue.title)
     if ctx.requested_issue is None:
         raise NotReadyError("autonomous hunting lands in C5", fix="pass --issue N")
     issue = fetch_issue(ctx.settings.target_repo, ctx.requested_issue, include_comments=True)
@@ -431,9 +435,11 @@ def planner_prompt(profile: str) -> str:
 
 
 def _live_verify(ctx: StepContext, plan: Plan, cand: Candidate) -> Verdict:
-    from warden.verify.gate import PROFILES
+    from warden.verify.gate import PROFILES, with_test_cmd
 
-    return verify_candidate(ctx, cand, PROFILES[ctx.settings.gate_profile], issue_number=plan.issue)
+    s = ctx.settings
+    commands = with_test_cmd(PROFILES[s.gate_profile], s.test_cmd)
+    return verify_candidate(ctx, cand, commands, issue_number=plan.issue)
 
 
 def verify_candidate(
@@ -539,7 +545,7 @@ def _spec_check(ctx: StepContext, candidate: Box, cand: Candidate, issue_number:
 def _live_pr(
     ctx: StepContext, issue: IssueRef, plan: Plan, cand: Candidate, verdict: Verdict
 ) -> PrOutcome:
-    from warden.integrate.branch import export_patch, push_fix_branch
+    from warden.integrate.branch import export_patch, push_fix_branch, refuse_protected
     from warden.integrate.pr import confirm_pr, evidence_table, labels_for, open_draft_pr
     from warden.sandbox.box import open_base
 
@@ -577,6 +583,7 @@ def _live_pr(
     candidate = open_base(s, ctx.log, phase="pr").sibling(cand.image_uuid)
     patch = export_patch(candidate, cwd=s.workdir, issue=issue.issue, title=issue.title)
     ctx.log.artifact("candidate.patch", patch)
+    refuse_protected(patch)  # a fix never rewrites CI: issue text may be a prompt injection
     base_rev = None
     if ctx.at_rev is not None:
         sha = candidate.run(f"git rev-parse {ctx.at_rev}", cwd=s.workdir, keep=False)

@@ -64,6 +64,8 @@ class Settings(BaseSettings):
     base_image: str = Field(default="warden/fabric-base:latest", alias="WARDEN_BASE_IMAGE")
     workdir: str = Field(default="/src", alias="WARDEN_WORKDIR")
     gate_profile: str = Field(default="fabric", alias="WARDEN_GATE_PROFILE")
+    # The target repo's own test command; replaces the gate profile's suite step when set
+    test_cmd: str = Field(default="", alias="WARDEN_TEST_CMD")
     shell_wrap: str = Field(default="with-services sh -c", alias="WARDEN_SHELL_WRAP")
     target_repo: str = Field(
         default="moiz-lakkadkutta/Fabric-Inventory", alias="WARDEN_TARGET_REPO"

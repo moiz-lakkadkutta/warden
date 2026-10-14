@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 import shlex
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from warden.runlog.events import EventLog
@@ -90,7 +90,15 @@ PROFILES: dict[str, GateCommands] = {
     "generic": DEFAULT_COMMANDS,
     "fabric": FABRIC_COMMANDS,
     "swe": SWE_COMMANDS,
+    # Any repo (the GitHub Action's default): only the repo's own test command, WARDEN_TEST_CMD.
+    "tests": SWE_COMMANDS,
 }
+
+
+def with_test_cmd(commands: GateCommands, test_cmd: str) -> GateCommands:
+    """`commands` with the suite step replaced by the repo's own test command (when set)."""
+    return replace(commands, suite=test_cmd) if test_cmd.strip() else commands
+
 
 # Check name -> the steps that make it up; a check whose steps are all "" is not run.
 CHECKS: dict[str, tuple[str, ...]] = {

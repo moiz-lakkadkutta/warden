@@ -99,6 +99,48 @@ uv run warden eval --n 10 --seed 7 --budget 5             # SWE-rebench sample, 
 
 [examples/demo-issue-201](examples/demo-issue-201) is a recorded `--demo` run; CI replays it offline.
 
+## Use it in your repo
+
+Add the `warden` label to an issue and Warden opens a **draft** PR with the evidence table, then
+comments on the issue with the PR link (or why there is none, and what the run cost). Copy this to
+`.github/workflows/warden.yml`:
+
+```yaml
+name: warden
+on:
+  issues:
+    types: [labeled]
+permissions:
+  contents: write        # push the warden/fix-* branch
+  pull-requests: write   # open the draft PR
+  issues: write          # comment on the issue, create the PENDING-HUMAN label
+jobs:
+  fix:
+    if: github.event.label.name == 'warden' && !github.event.issue.pull_request
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: moiz-lakkadkutta/warden@main   # pin a commit sha in production
+        with:
+          nebius-api-key: ${{ secrets.NEBIUS_API_KEY }}
+          nebius-project-id: ${{ secrets.NEBIUS_PROJECT_ID }}
+          tavily-api-key: ${{ secrets.TAVILY_API_KEY }}
+          base-image: ${{ vars.WARDEN_BASE_IMAGE }}   # your repo at /src, test deps installed
+          test-command: pytest -q
+          max-usd: "2.0"
+          # planner-model / implementer-model / tools-model override the Nemotron defaults
+```
+
+Set the secrets `NEBIUS_API_KEY`, `NEBIUS_PROJECT_ID`, `TAVILY_API_KEY` and the variable
+`WARDEN_BASE_IMAGE`, and create a `warden` label. All inputs are in [action.yml](action.yml).
+
+What it will not do: run for a labeler without write access, run in a fork, check out PR code,
+put a token in a sandbox (the patch leaves the sandbox and is pushed from the runner), push a
+change to `.github/`, or merge. Issue text reaches the models fenced as untrusted data, and issue
+comments are never read. Money / tax / schema / security fixes get `PENDING-HUMAN`. PRs opened
+with the default `GITHUB_TOKEN` do not trigger your CI; pass a GitHub App token as `github-token`
+if you want CI on them.
+
 ## Limitations
 
 - The Hunter (finding bugs before fixing them) is designed but not yet shipped; issues come from
