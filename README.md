@@ -1,64 +1,105 @@
 # Warden
 
-**Hunt → Plan → Fix → Verify → PR.** An autonomous coding agent that finds the bug, fixes it
-test-first in a forked Nebius Sandbox, and has a second agent prove the tests are real before a PR
-is opened. Runs on **Nebius Token Factory Sandboxes** with **NVIDIA Nemotron 3 Ultra / Super / 3.5 Lightning**.
-
-> Status: Phase A (spike) — see [docs/warden-plan.md](docs/warden-plan.md). `warden run --demo` works today.
+**Hunt → Plan → Fix → Verify → PR.** An autonomous coding agent that fixes an issue test-first in
+a forked Nebius Sandbox, then has a second, adversarial pass prove the new tests are real, the old
+tests still pass, and the diff does what the issue says, before a draft PR is opened. It runs on
+**Nebius Token Factory Sandboxes** with **NVIDIA Nemotron 3 Ultra / Super / 3.5 Lightning**.
 
 ```bash
 uvx warden doctor            # checks tools + keys, no network
-uvx warden run --demo        # whole loop on a fake sandbox, no credentials, ~2 s
-uvx warden console           # render the run's timeline + evidence table
-uvx warden resume <run_id>   # continue an interrupted run from its last completed phase
+uvx warden run --demo        # the whole loop on a fake sandbox, no credentials, ~2 s
+uvx warden console           # the run's timeline + evidence table
 ```
 
-[examples/demo-issue-201](examples/demo-issue-201) is a recorded `--demo` run; CI replays it offline.
+## What it has done (real runs, not demos)
+
+- **[Fabric-Inventory#221](https://github.com/moiz-lakkadkutta/Fabric-Inventory/pull/221)**: a
+  closed ERP issue (#196, a money bug in invoice totals) was re-solved unattended from the issue
+  text alone, with comments hidden, on the code as it was before the human fix. **24 min, $0.17.**
+  Draft PR labelled `PENDING-HUMAN`. The target repo's own CI: **7/7 jobs green.**
+- The theater check on that run: the new repro test **fails on the unfixed base**
+  (`10498.95 == 0`) and passes on the candidate ([screenshot](docs/spike-A7.png)).
+- SWE-rebench on Nebius's preloaded task images: see [Results](#results).
 
 ## Runs on Nebius
 
 | Piece | How Warden uses it |
 |---|---|
-| Token Factory (OpenAI-compatible) | all model calls; JSON-schema structured output; function calling |
-| Token Factory **Sandboxes** | every issue is a fork of a base checkpoint; the **theater check** forks the unfixed base and runs only the new tests (they must fail); best-of-N forks N candidates |
-| Serverless Endpoint | hosts the read-only run console |
+| Token Factory (OpenAI-compatible) | every model call; JSON-schema structured output; function calling |
+| Token Factory **Sandboxes** | every issue is a fork of a base checkpoint (~1 s). The **theater check** forks the *unfixed* base and runs only the new tests (they must fail). The **regression check** runs the base's own tests on both forks. The gate runs on disposable forks, so the candidate is never modified |
+| Preloaded SWE-rebench images | `warden eval` plans, fixes and verifies on the task image, then grades with the hidden tests the agent never saw |
 
 ## NVIDIA models
 
 | Role | Model | Why |
 |---|---|---|
-| Plan, verdict, probe planning | `nvidia/Nemotron-3-Ultra-550b-a55b` | reasoning and adversarial judgement |
-| Implement | `nvidia/nemotron-3-super-120b-a12b` | code at a third of Ultra's cost |
-| Tool calls, parsing, probe execution | `nvidia/Nemotron-3_5-Lightning` | harness-trained for tool use; cheapest |
+| Plan, verdict (spec review) | `nvidia/Nemotron-3-Ultra-550b-a55b` | reasoning and adversarial judgement |
+| Implement (tool-calling loop) | `nvidia/nemotron-3-super-120b-a12b` | 19 of 19 tool calls well-formed on the first Fabric fix; a third of Ultra's cost |
+| Research queries, parsing | `nvidia/Nemotron-3_5-Lightning` | cheapest; structured output for small tasks |
+
+Models are bound by env (`WARDEN_*_MODEL`) and swap without code changes.
+
+## How the verifier decides
+
+The implementer's word is never evidence. A candidate is **FAIL** unless every row holds:
+
+| Check | Where | Fails when |
+|---|---|---|
+| Theater | fork of the unfixed base + only the new test files | every new test passes without the fix |
+| Gate | disposable forks of the candidate | suite red, or a configured lint / type / migration / OpenAPI check red |
+| Existing tests | base and candidate, with the **base's** test files | a test green on base is red on the candidate |
+| Spec review | one Ultra call over the issue + diff | a behaviour the issue states is not implemented, *and* the model's quote of it is found verbatim in the issue |
+
+Inconclusive results (collection errors, timeouts, unquotable claims) are concerns, never proof.
+Checks a repo cannot run are listed as **not verified**, never shown as green. Money / tax /
+schema / security changes are labelled `PENDING-HUMAN`. Warden never merges.
 
 ## Results
 
-_Filled in Phase E: SWE-rebench resolved %, verifier false-PASS %, theater catches, $/task, with task ids._
+_SWE-rebench numbers are generated from [`evals/swe_rebench/results.csv`](evals/swe_rebench/results.csv)
+(fixed seed, task ids in [`task_ids.txt`](evals/swe_rebench/task_ids.txt)). The table lands here
+with the next eval run: resolved %, verifier false-PASS %, false-FAIL %, theater catches, $/task._
 
 ## How it works
 
 ```
-issue ─▶ HUNTER (race / IDOR / money invariants / malformed / flow probes) ─▶ files issue with repro
-      ─▶ PLANNER (Ultra + Tavily citations) ─▶ Plan{files, tests, risk_class}
-      ─▶ base.fork() ─▶ IMPLEMENTER (Super; tools via Lightning; TDD)
-      ─▶ VERIFIER (fresh Ultra): theater check · full gate · race probe ─▶ Verdict
-      ─▶ INTEGRATOR: waves · merge --no-ff · PR with evidence table (PENDING-HUMAN for money/tax/schema/security)
+issue ─▶ PLANNER (Ultra + Tavily citations, sandbox code context) ─▶ Plan{files, tests, risk_class}
+      ─▶ base.fork() ─▶ IMPLEMENTER (Super, tool calls, write the failing test first)
+      ─▶ VERIFIER: theater · gate · existing tests · spec review ─▶ Verdict
+      ─▶ PR: patch leaves the sandbox via format-patch, pushed from the host; evidence table body
 ```
+
+Every model call and sandbox operation is appended to `runs/<id>/events.jsonl` with tokens, cost
+and wall-clock; `warden console` renders it. A per-issue cost cap stops the run cleanly, and
+`warden resume <run_id>` continues from the last completed phase.
 
 ## Quickstart (live)
 
 ```bash
-git clone … && cd warden && uv sync --all-extras --dev
-cp .env.example .env         # Nebius key, Sandboxes base URL, Tavily key
+git clone https://github.com/moiz-lakkadkutta/warden && cd warden && uv sync --all-extras --dev
+cp .env.example .env         # Nebius key + project id, Sandboxes URL, Tavily key
 uv run warden doctor --live
-uv run warden init /path/to/repo
-uv run warden run --issue 201 --dry-run
-uv run warden resume <run_id>   # printed on the first line of every run
+uv run warden run --issue 196 --at '43f3851^' --dry-run   # plan only
+uv run warden eval --n 10 --seed 7 --budget 5             # SWE-rebench sample, capped spend
 ```
+
+[examples/demo-issue-201](examples/demo-issue-201) is a recorded `--demo` run; CI replays it offline.
+
+## Limitations
+
+- The Hunter (finding bugs before fixing them) is designed but not yet shipped; issues come from
+  GitHub or the benchmark.
+- SWE-rebench issues are often under-specified: a hidden test can require an interface the issue
+  never names. A verifier that only reads the issue cannot catch those, and the false-PASS rate
+  is reported with that in mind, not hidden.
+- End-to-end runs so far target one codebase, [Fabric-Inventory](https://github.com/moiz-lakkadkutta/Fabric-Inventory)
+  (FastAPI + Postgres ERP); the SWE-rebench sample is the cross-repo evidence.
+- Nemotron vs frontier models: we report what these models do on our harness and do not compare
+  to other leaderboards.
 
 ## Feedback on the tooling
 
-See [FEEDBACK.md](FEEDBACK.md).
+[FEEDBACK.md](FEEDBACK.md): dated, measured notes on Sandboxes, Token Factory and Nemotron.
 
 ## License
 
