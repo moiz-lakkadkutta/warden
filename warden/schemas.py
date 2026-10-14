@@ -64,7 +64,26 @@ class Plan(BaseModel):
     files_to_touch: list[str]
     tests_to_add: list[str]
     landing_order: list[str]
-    risk_class: list[RiskClass]
+    risk_class: list[RiskClass] = Field(
+        description=(
+            "Every class the change itself touches; ['none'] when none applies. "
+            "money: amounts, prices, balances, currency rounding, payments. "
+            "tax: tax rates, tax computation, tax reporting. "
+            "schema: a DATABASE or persistent-storage schema — tables, columns, constraints, "
+            "indexes, ORM models backed by a database, migrations. Changing a public data or "
+            "serialization format (JSON/XML/CSV/YAML output, key or field order, an API "
+            "payload shape) is NOT schema. "
+            "security: authentication, authorization, access control, secrets, injection, "
+            "crypto. concurrency: races, locking, idempotency, transactions under parallel load."
+        )
+    )
+    risk_rationale: str = Field(
+        default="",
+        description=(
+            "One sentence per class in risk_class naming the code that puts the change in that "
+            "class (e.g. 'schema: adds a column via an alembic migration'); for none, why none."
+        ),
+    )
     citations: list[Citation]
     acceptance: list[str] = Field(description="Human-readable checks the verifier will run.")
 

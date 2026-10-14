@@ -219,6 +219,10 @@ def plan_issue(
         Role.PLANNER, "plan", prompt, planner_user_message(issue, repo_ctx, sources), Plan
     )
 
+    log.emit(
+        "plan", "note", {"risk_class": list(plan.risk_class), "risk_rationale": plan.risk_rationale}
+    )
+
     # Match on scheme-less, slash-trimmed URLs; keep the URL research actually returned.
     allowed = {_url_key(s.url): s.url for s in sources}
     kept = [

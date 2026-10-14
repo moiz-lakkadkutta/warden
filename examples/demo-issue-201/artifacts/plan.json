@@ -15,6 +15,7 @@
     "money",
     "concurrency"
   ],
+  "risk_rationale": "",
   "citations": [
     {
       "url": "https://docs.sqlalchemy.org/en/20/orm/queryguide/query.html#sqlalchemy.orm.Query.with_for_update",
