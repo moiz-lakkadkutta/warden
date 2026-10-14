@@ -45,7 +45,10 @@ ROW: dict[str, Any] = {
     # the dataset cuts ids at the first space: pytest's `test_p[a b]` is listed as `test_p[a`
     "PASS_TO_PASS": ["tests/test_utils.py::test_comments", "tests/test_new.py::test_p[a"],
     "test_patch": TEST_PATCH,
-    "install_config": {"test_cmd": "pytest --no-header -rA --tb=line -p no:cacheprovider"},
+    "install_config": {
+        "test_cmd": "pytest --no-header -rA --tb=line -p no:cacheprovider",
+        "install": "pip install -e .[dev]",
+    },
     "patch": "diff --git a/gold b/gold",  # the gold patch: must never be cached
 }
 
@@ -271,4 +274,20 @@ def test_prepare_base_installs_the_env_wrapper_and_a_python_m_pytest_shim(log: E
         < wrapper.index("/opt/miniconda3")
         < wrapper.index(swe.SHIM_DIR)
     )
-    assert backend.calls[-1] == f"chmod +x {swe.WRAPPER} {swe.SHIM_DIR}/pytest"
+    assert f"chmod +x {swe.WRAPPER} {swe.SHIM_DIR}/pytest" in backend.calls
+
+
+def test_prepare_base_reinstalls_the_package_from_testbed(log: EventLog) -> None:
+    # SpikeInterface__spikeinterface-2775: the image's editable install points at
+    # /spikeinterface/src, not /testbed, so nothing imports until the task's install re-runs
+    task = swe.Task.from_row(ROW)
+    assert task.install == "pip install --no-deps -e .[dev]"
+    backend = FakeBackend()
+    swe.prepare_base(backend, task, log)
+    assert backend.calls[-1] == f"{swe.WRAP} 'pip install --no-deps -e .[dev]'"
+    multi = swe.Task.from_row(
+        {**ROW, "install_config": {"install": "for d in a b; do (cd $d; pip install -e .); done"}}
+    )
+    assert multi.install == "for d in a b; do (cd $d; pip install --no-deps -e .); done"
+    bare = swe.Task.from_row({**ROW, "install_config": {}})
+    assert bare.install == ""

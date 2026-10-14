@@ -56,6 +56,7 @@ WRAPPER_SCRIPT = (
 PYTEST_SHIM = '#!/bin/sh\nexec python -m pytest "$@"\n'
 TEST_PATCH = "/tmp/warden-test.patch"
 GRADE_TIMEOUT = 1800
+INSTALL_TIMEOUT = 900
 
 CSV_COLUMNS = (
     "task_id",
@@ -83,6 +84,7 @@ class Task(BaseModel):
     pass_to_pass: list[str]
     test_patch: str
     test_cmd: str
+    install: str = ""  # re-run in the base: some images' editable installs point elsewhere
 
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> Task:
@@ -102,6 +104,8 @@ class Task(BaseModel):
             pass_to_pass=ids(row["PASS_TO_PASS"]),
             test_patch=row["test_patch"],
             test_cmd=config.get("test_cmd") or "pytest -rA",
+            # --no-deps: the env is already pinned; only re-point the package at /testbed
+            install=(config.get("install") or "").replace("pip install ", "pip install --no-deps "),
         )
 
     @property
@@ -198,7 +202,17 @@ def prepare_base(backend: SandboxBackend, task: Task, log: EventLog) -> Box:
     )
     if not res.ok or res.box is None:
         raise RuntimeError(f"could not prepare {task.tag}: {res.stderr.strip()[:200]}")
-    return res.box
+    if not task.install:
+        return res.box
+    # Some images were built with the repo elsewhere (SpikeInterface: the editable .pth names
+    # /spikeinterface/src), so the package does not import from /testbed until reinstalled.
+    inst = res.box.run(
+        f"{WRAP} {shlex.quote(task.install)}", cwd=WORKDIR, keep=True, timeout=INSTALL_TIMEOUT
+    )
+    if not inst.ok or inst.box is None:
+        tail = (inst.stdout + inst.stderr).strip()[-300:]
+        raise RuntimeError(f"install failed in {task.tag} ({task.install}): {tail}")
+    return inst.box
 
 
 def task_settings(settings: Settings, task: Task, base_uuid: str) -> Settings:

@@ -82,7 +82,9 @@ class FakeBackend:
             return "", "fake backend: unknown command ||", 127
         if "|" in parts:
             parts = parts[: parts.index("|")]
-        if not parts or parts[0] in ("true", "chmod"):
+        if len(parts) == 4 and parts[1:3] == ["sh", "-c"]:  # `<wrapper> sh -c '<cmd>'`
+            return self._interpret(img, parts[3], cwd)
+        if not parts or parts[0] in ("true", "chmod", "pip"):
             return "", "", 0
         if parts[0] == "false":
             return "", "", 1
