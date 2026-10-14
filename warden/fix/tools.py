@@ -1,4 +1,4 @@
-"""Tool JSON schemas: list_files, read_file, grep, write_file, run_shell (repo root, 600 s).
+"""Tool JSON schemas: list_files, read_file, grep, write_file, replace_in_file, run_shell.
 
 `TOOL_SCHEMAS` is what Lightning routes over; `ToolDispatcher` validates the model's JSON args
 with the pydantic models in `warden.schemas`, executes ONLY through `Box` (`run` / `copy_in`) and
@@ -11,6 +11,11 @@ and sends integers as strings, and each rejection burned a whole turn (9 of 25 o
 Unknown keys are dropped, known aliases renamed, numeric strings coerced, out-of-range integers
 clamped and nulls for defaulted keys removed; every repair is recorded on the `tool` event. A
 missing or empty required argument is still an error.
+
+Write guards (pilot 3: Super wrote a 309-byte fragment over 19 kB pennylane exp.py and spent 30
+turns recovering): write_file refuses to shrink a file of SHRINK_MIN_BYTES or more below
+SHRINK_RATIO of its size unless `allow_shrink` is set, and replace_in_file edits one exact,
+unique span so large files never need a whole-file rewrite.
 """
 
 from __future__ import annotations
@@ -31,19 +36,28 @@ from warden.schemas import (
     ListFilesArgs,
     Phase,
     ReadFileArgs,
+    ReplaceInFileArgs,
     RunShellArgs,
     ToolArgs,
     ToolName,
     WriteFileArgs,
 )
 
-TOOL_NAMES: tuple[ToolName, ...] = ("list_files", "read_file", "grep", "write_file", "run_shell")
+TOOL_NAMES: tuple[ToolName, ...] = (
+    "list_files",
+    "read_file",
+    "grep",
+    "write_file",
+    "replace_in_file",
+    "run_shell",
+)
 
 _ARGS: dict[str, type[ToolArgs]] = {
     "list_files": ListFilesArgs,
     "read_file": ReadFileArgs,
     "grep": GrepArgs,
     "write_file": WriteFileArgs,
+    "replace_in_file": ReplaceInFileArgs,
     "run_shell": RunShellArgs,
 }
 
@@ -61,8 +75,12 @@ _DESCRIPTIONS: dict[str, str] = {
         "path:line:text matches; use it to find definitions and call sites before editing."
     ),
     "write_file": (
-        "Create or replace one whole file with content (no diffs or partial edits); "
-        "path relative to the repo root."
+        "Create a file or replace one whole file with content; path relative to the repo root. "
+        "To change part of an existing file use replace_in_file instead."
+    ),
+    "replace_in_file": (
+        "Edit an existing file: replace the one exact occurrence of `old` (copied from "
+        "read_file, indentation included) with `new`; errors if `old` is missing or not unique."
     ),
     "run_shell": (
         "Run a shell command at the repo root (e.g. pytest -q backend/tests/test_x.py) and get "
@@ -116,6 +134,9 @@ class ToolResult:
     # read_file only: the 1-based lines shown (first, last) and the file's line count
     lines: tuple[int, int] | None = None
     total_lines: int | None = None
+    # a write the dispatcher refused before touching the box, e.g.
+    # {"reason": "shrink", "old_bytes": 19000, "new_bytes": 309}; also on the tool event
+    refused: dict[str, Any] | None = None
 
 
 def truncate(text: str, limit: int = 8000) -> tuple[str, bool]:
@@ -214,6 +235,15 @@ _ALIASES: dict[str, str] = {
     "query": "pattern",
     "cmd": "command",
     "contents": "content",
+    "old_string": "old",
+    "old_str": "old",
+    "old_text": "old",
+    "search": "old",
+    "find": "old",
+    "new_string": "new",
+    "new_str": "new",
+    "new_text": "new",
+    "replacement": "new",
     "text": "content",
 }
 _INT_STR = re.compile(r"^\s*[+-]?\d+(?:\.0*)?\s*$")
@@ -296,6 +326,20 @@ def _ms(t0: float) -> int:
 
 
 MIN_SHELL_TIMEOUT = 120
+SHRINK_MIN_BYTES = 1024  # smaller files are never guarded
+SHRINK_RATIO = 0.5  # a rewrite below this fraction of the old size is refused
+
+SHRINK_MSG = (
+    "refused: write_file would shrink {path} from {old} to {new} bytes. write_file replaces the "
+    "WHOLE file, so a fragment deletes everything else. To change part of the file use "
+    "replace_in_file; to rewrite it, read_file every page and send the complete file. Pass "
+    "allow_shrink=true only if deleting most of the file is intended."
+)
+
+
+def shrinks(old: int, new: int) -> bool:
+    """Would replacing `old` bytes with `new` clobber the file (see SHRINK_MSG)?"""
+    return old >= SHRINK_MIN_BYTES and new < old * SHRINK_RATIO
 
 
 class ToolDispatcher:
@@ -366,6 +410,9 @@ class ToolDispatcher:
         }
         if error is not None:
             data["error"] = error
+        if result.refused is not None:
+            data["error"] = result.output
+            data["refused"] = result.refused
         if fixed.ignored:  # tolerated, not rejected: kept on the event so the habit is measurable
             data["ignored_args"] = scrub_args(fixed.ignored)
         if fixed.repaired:
@@ -415,13 +462,32 @@ class ToolDispatcher:
             if content and not content.endswith("\n"):  # models drop it; linters flag W292
                 content += "\n"
             data = content.encode()
-            if parsed.path.startswith("/"):
-                child = box.copy_in({parsed.path.lstrip("/"): data}, cwd="/")
-            else:
-                child = box.copy_in({parsed.path: data}, cwd=cwd)
+            if not parsed.allow_shrink:
+                old = box.run(f"cat {shlex.quote(parsed.path)}", cwd=cwd, keep=False)
+                size = len(old.stdout.encode())
+                if old.ok and shrinks(size, len(data)):
+                    msg = SHRINK_MSG.format(path=parsed.path, old=size, new=len(data))
+                    refused = {"reason": "shrink", "old_bytes": size, "new_bytes": len(data)}
+                    return ToolResult(name, False, msg, None, box, _ms(t0), False, refused=refused)
+            child = self._copy_in(box, parsed.path, data)
             return self._finish(
                 child, name, True, f"wrote {len(data)} bytes to {parsed.path}", 0, t0
             )
+        if isinstance(parsed, ReplaceInFileArgs):
+            res = box.run(f"cat {shlex.quote(parsed.path)}", cwd=cwd, keep=False)
+            if not res.ok:
+                return self._read(box, name, res, t0)
+            text, err = replace_once(res.stdout, parsed.old, parsed.new)
+            if err:
+                msg = f"refused: replace_in_file on {parsed.path}: {err}"
+                return ToolResult(name, False, msg, 1, box, _ms(t0), False)
+            data = text.encode()
+            child = self._copy_in(box, parsed.path, data)
+            msg = (
+                f"replaced 1 occurrence in {parsed.path} "
+                f"({len(res.stdout.encode())} → {len(data)} bytes)"
+            )
+            return self._finish(child, name, True, msg, 0, t0)
         if isinstance(parsed, RunShellArgs):
             # Models pick tight limits (10 s, 30 s) for installs and suites; a floor keeps a
             # slow first import from looking like a failure.
@@ -436,3 +502,28 @@ class ToolDispatcher:
             output += f"\n[exit {res.exit_code}]"
             return self._finish(res.box or box, name, res.ok, output, res.exit_code, t0)
         raise AssertionError(f"unhandled tool args {type(parsed).__name__}")  # pragma: no cover
+
+    def _copy_in(self, box: Box, path: str, data: bytes) -> Box:
+        if path.startswith("/"):
+            return box.copy_in({path.lstrip("/"): data}, cwd="/")
+        return box.copy_in({path: data}, cwd=self._cwd)
+
+
+def replace_once(text: str, old: str, new: str) -> tuple[str, str]:
+    """`(text with the one occurrence of old replaced, "")`, or `(text, error)` when `old` is
+    missing or occurs more than once. Shared by the dispatcher and the implementer's
+    test-deletion guard so both see the same result."""
+    n = text.count(old)
+    if n == 0:
+        return text, (
+            "`old` not found; read_file the region again and copy the exact text, "
+            "indentation and blank lines included"
+        )
+    if n > 1:
+        return text, (
+            f"`old` matches {n} places; include more surrounding lines so it matches exactly one"
+        )
+    out = text.replace(old, new, 1)
+    if out and not out.endswith("\n") and text.endswith("\n"):
+        out += "\n"
+    return out, ""

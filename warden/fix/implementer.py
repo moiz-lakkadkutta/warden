@@ -1,4 +1,4 @@
-"""TDD loop: write failing test → run → implement (whole-file rewrites) → run → `finish`.
+"""TDD loop: write failing test → run → implement (replace_in_file / write_file) → run → `finish`.
 
 Super (`Role.IMPLEMENTER`) drives the five TOOLS schemas plus a `finish` pseudo-tool directly; a
 prose-only turn is routed once through Lightning (`Role.TOOLS`) into tool calls and spliced into
@@ -30,6 +30,7 @@ from warden.fix.tools import (
     TOOL_SCHEMAS,
     ToolDispatcher,
     as_message,
+    replace_once,
     strict_schema,
     tolerate_args,
 )
@@ -230,15 +231,26 @@ def compact_history(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
+_ELIDE_KEYS: dict[str, tuple[str, ...]] = {
+    "write_file": ("content",),
+    "replace_in_file": ("old", "new"),
+}
+
+
 def _elide_write(call: dict[str, Any]) -> dict[str, Any]:
     fn = call["function"]
-    if fn["name"] != "write_file":
+    keys = _ELIDE_KEYS.get(fn["name"])
+    if keys is None:
         return call
     args = json.loads(fn["arguments"])  # built by assistant_message: always valid JSON
-    content = args.get("content")
-    if not isinstance(content, str) or len(content) <= ELIDE_MIN:
+    changed = False
+    for key in keys:
+        value = args.get(key)
+        if isinstance(value, str) and len(value) > ELIDE_MIN:
+            args[key] = f"[{len(value)} chars written]"
+            changed = True
+    if not changed:
         return call
-    args["content"] = f"[{len(content)} chars written]"
     return {**call, "function": {**fn, "arguments": json.dumps(args)}}
 
 
@@ -255,7 +267,7 @@ def _tool_message(tool_call_id: str, content: str) -> dict[str, Any]:
 REREAD_MSG = (
     "unchanged since turn {turn}: {path} lines {first}-{last} have not changed and that "
     "read_file result is still in this conversation. You already have it — now write the test "
-    "or make the edit with write_file, or run the tests with run_shell."
+    "or make the edit with replace_in_file or write_file, or run the tests with run_shell."
 )
 RESENT_PREFIX = "[unchanged since turn {turn}; re-sent because that output was elided]\n"
 IDLE_NUDGE = (
@@ -356,6 +368,30 @@ def _charge(res: ChatResult, progress: Progress) -> float:
 
 def _cat(box: Box, path: str, cwd: str) -> Any:
     return box.run(f"cat {shlex.quote(path)}", cwd=cwd, keep=False)
+
+
+EDIT_TOOLS = ("write_file", "replace_in_file")
+
+
+def _edit_path(name: str, args: Any) -> str | None:
+    """The file a write_file / replace_in_file call edits, when its arguments are usable."""
+    if name not in EDIT_TOOLS or not isinstance(args, dict):
+        return None
+    path = args.get("path")
+    need = ("content",) if name == "write_file" else ("old", "new")
+    if not isinstance(path, str) or not all(isinstance(args.get(k), str) for k in need):
+        return None
+    return path
+
+
+def _after_edit(name: str, args: dict[str, Any], before: str | None) -> str | None:
+    """The file's content once the edit lands (None: the edit would fail)."""
+    if name == "write_file":
+        return str(args["content"])
+    if before is None:
+        return None
+    text, err = replace_once(before, str(args["old"]), str(args["new"]))
+    return None if err else text
 
 
 def _step_text(name: str, args: Any, exit_code: int | None) -> str:
@@ -466,17 +502,16 @@ def run_implementer(
             if turns >= max_tool_turns:
                 messages.append(_tool_message(cid, BUDGET_MSG))
                 continue
-            is_test_write = (
-                name == "write_file"
-                and isinstance(args, dict)
-                and isinstance(args.get("path"), str)
-                and isinstance(args.get("content"), str)
-                and is_test_path(args["path"], plan, root)
-            )
-            if is_test_write:
-                path = str(args["path"])
+            edit_path = _edit_path(name, args)
+            is_test_write = edit_path is not None and is_test_path(edit_path, plan, root)
+            after: str | None = None
+            if is_test_write and edit_path is not None and isinstance(args, dict):
+                path = edit_path
                 before = _cat(box, path, root)
-                removed = removed_tests(before.stdout, str(args["content"])) if before.ok else []
+                after = _after_edit(name, args, before.stdout if before.ok else None)
+                removed = (
+                    removed_tests(before.stdout, after) if before.ok and after is not None else []
+                )
                 if removed:
                     turns += 1
                     messages.append(
@@ -520,7 +555,14 @@ def run_implementer(
             if resent is not None and result.ok:
                 message["content"] = RESENT_PREFIX.format(turn=resent[0]) + message["content"]
             messages.append(message)
-            mutating = name in ("write_file", "run_shell") and result.exit_code is not None
+            if result.refused is not None and edit_path is not None:
+                note(
+                    "refused_shrink",
+                    path=edit_path,
+                    **{k: v for k, v in result.refused.items() if k != "reason"},
+                )
+                hooks.step(f"{name} {edit_path} → refused: would shrink the file")
+            mutating = name in (*EDIT_TOOLS, "run_shell") and result.exit_code is not None
             idle = 0 if mutating else idle + 1
             if name == "run_shell" and result.exit_code is not None:
                 memory.forget(None)  # a command may have rewritten any file
@@ -528,16 +570,16 @@ def run_implementer(
                 memory.record(
                     wanted[0], *result.lines, result.total_lines, turns, len(messages) - 1
                 )
-            if name == "write_file" and result.ok:
-                memory.forget(str(args["path"]))
-                path = str(args["path"])
+            if edit_path is not None and result.ok:
+                memory.forget(edit_path)
+                path = edit_path
                 first_write = path if first_write is None else first_write
                 key = _norm(path, root)
                 if is_test_write and not on_base.get(key, True):
                     if key not in tests_added:
                         tests_added.append(key)
-                elif is_test_write:  # existing file: each new test function is a node id
-                    for name_ in test_nodes(str(args["content"])):
+                elif is_test_write and after is not None:  # existing file: new tests are nodes
+                    for name_ in test_nodes(after):
                         node = f"{key}::{name_}"
                         if name_ not in base_tests[key] and node not in tests_added:
                             tests_added.append(node)

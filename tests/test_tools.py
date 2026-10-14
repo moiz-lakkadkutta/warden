@@ -33,8 +33,15 @@ def _events(log: EventLog) -> list[Any]:
 
 
 def test_tool_schemas_shape() -> None:
-    assert TOOL_NAMES == ("list_files", "read_file", "grep", "write_file", "run_shell")
-    assert len(TOOL_SCHEMAS) == 5
+    assert TOOL_NAMES == (
+        "list_files",
+        "read_file",
+        "grep",
+        "write_file",
+        "replace_in_file",
+        "run_shell",
+    )
+    assert len(TOOL_SCHEMAS) == 6
     assert [s["function"]["name"] for s in TOOL_SCHEMAS] == list(TOOL_NAMES)
     for schema in TOOL_SCHEMAS:
         assert schema["type"] == "function"
@@ -216,7 +223,7 @@ def test_every_call_emits_tool_event(log: EventLog) -> None:
     assert [e.data["ok"] for e in tool] == [True, True, True, True, True, False, False]
     assert [e.data["exit_code"] for e in tool] == [0, 0, 0, 0, 0, None, None]
     write = tool[3].data
-    assert write["args"] == {"path": "src/b.py", "bytes": 14}
+    assert write["args"] == {"path": "src/b.py", "bytes": 14, "allow_shrink": False}
     assert "secret-content" not in str(write)
     assert write["from"] == box.uuid and write["to"] != box.uuid
     shell = tool[4].data

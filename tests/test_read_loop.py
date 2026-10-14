@@ -131,7 +131,7 @@ def test_a_write_to_the_file_invalidates_its_reads(log: EventLog) -> None:
     script = [
         read(),
         read("src/other.py"),
-        turn(tool_call("write_file", path=SRC, content=new)),
+        turn(tool_call("write_file", path=SRC, content=new, allow_shrink=True)),
         read(),  # changed: must be served, and it is the new content
         read("src/other.py"),  # untouched by that write: still cached
         finish_turn(),

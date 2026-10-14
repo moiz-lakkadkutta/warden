@@ -16,7 +16,7 @@ Severity = Literal["P0", "P1", "P2", "P3"]
 RiskClass = Literal["money", "tax", "schema", "security", "concurrency", "none"]
 Decision = Literal["PASS", "PASS_WITH_CONCERNS", "FAIL"]
 Phase = Literal["hunt", "plan", "fix", "verify", "pr"]
-ToolName = Literal["list_files", "read_file", "grep", "write_file", "run_shell"]
+ToolName = Literal["list_files", "read_file", "grep", "write_file", "replace_in_file", "run_shell"]
 
 HUMAN_GATE: frozenset[str] = frozenset({"money", "tax", "schema", "security"})
 
@@ -260,6 +260,25 @@ class WriteFileArgs(ToolArgs):
         min_length=1, description="File to create or replace, relative to the repo root."
     )
     content: str = Field(description="The complete new contents of the file.")
+    allow_shrink: bool = Field(
+        False,
+        description=(
+            "true only to delete most of an existing file on purpose; otherwise a write that "
+            "would shrink a file of 1 kB or more below half its size is refused."
+        ),
+    )
+
+
+class ReplaceInFileArgs(ToolArgs):
+    path: str = Field(min_length=1, description="File to edit, relative to the repo root.")
+    old: str = Field(
+        min_length=1,
+        description=(
+            "Exact text to replace, copied from read_file with its indentation; it must occur "
+            "exactly once (include surrounding lines to make it unique)."
+        ),
+    )
+    new: str = Field(description="Text that replaces `old`.")
 
 
 class RunShellArgs(ToolArgs):
