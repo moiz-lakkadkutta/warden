@@ -129,6 +129,15 @@ def test_grade_command_resets_hidden_test_files_then_applies_and_runs() -> None:
     assert "test_parse_params" not in cmd and "test_p[a" not in cmd
 
 
+def test_grade_command_resets_data_files_but_does_not_run_them() -> None:
+    # IAMconsortium__nomenclature-431: the test patch adds a YAML fixture; passing it to pytest
+    # makes the whole run "ERROR: not found", so nothing passes even with the gold patch
+    data = "diff --git a/tests/data/v.yaml b/tests/data/v.yaml\nnew file mode 100644\n"
+    cmd = swe.grade_command(swe.Task.from_row({**ROW, "test_patch": TEST_PATCH + data}))
+    assert "rm -f tests/data/v.yaml" in cmd
+    assert cmd.endswith("-p no:cacheprovider tests/test_utils.py tests/test_new.py")
+
+
 def test_parse_test_lines_cuts_ids_at_the_first_space_like_the_dataset() -> None:
     out = (
         "PASSED tests/test_x.py::test_p[a b]\n"
@@ -165,14 +174,50 @@ def test_grade_resolved_only_when_every_listed_test_passes() -> None:
     assert g.resolved and g.f2p_passed == 1 and g.p2p_passed == 2
     call = box.calls[0]
     assert call["shell"].startswith("testbed-env sh -c ")
+    assert call["shell"].endswith(f"> {swe.GRADE_LOG} 2>&1")
     assert call["files"] == {"/tmp/warden-test.patch": TEST_PATCH.encode()}
-    assert call["cwd"] == "/testbed" and call["keep"] is False
+    assert call["cwd"] == "/testbed" and call["keep"] is True
 
     only_f2p = _StubBox(_passed(*task.fail_to_pass), 1)
     missing_p2p = swe.grade(only_f2p, task)  # type: ignore[arg-type]
     assert not missing_p2p.resolved and missing_p2p.f2p_passed == 1
     nothing = swe.grade(_StubBox("error: patch failed\n", 1), task)  # type: ignore[arg-type]
     assert not nothing.resolved
+
+
+class _LogBox:
+    """A graded checkpoint whose log is read back in chunks (sandbox stdout stops at 64 KiB)."""
+
+    def __init__(self, log: str, code: int) -> None:
+        self.log, self.code = log, code
+        self.calls: list[str] = []
+
+    def run(self, shell: str, **kw: Any) -> RunResult:
+        self.calls.append(shell)
+        if "tail -c +" in shell:  # `… | tail -c +OFF | head -c N`
+            off = int(shell.split("tail -c +")[1].split()[0])
+            n = int(shell.split("head -c ")[1].split()[0])
+            status = "".join(
+                " ".join(line.split()[:2]) + "\n"
+                for line in self.log.splitlines()
+                if line.split()[:1] and line.split()[0] in ("PASSED", "FAILED")
+            )
+            return RunResult(status[off - 1 : off - 1 + n], "", 0, None, 1)
+        if shell.startswith("tail -c"):
+            return RunResult(self.log[-50:], "", 0, None, 1)
+        return RunResult("", "", self.code, self, 1)  # type: ignore[arg-type]
+
+
+def test_grade_reads_a_log_larger_than_one_chunk(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(swe, "GRADE_CHUNK", 40)
+    task = swe.Task.from_row(ROW)
+    log = "".join(f"PASSED {t} - ok\n" for t in task.pass_to_pass) + "noise\n"
+    log += "".join(f"PASSED {t}\n" for t in task.fail_to_pass) + "=== 3 passed ===\n"
+    box = _LogBox(log, 0)
+    g = swe.grade(box, task)  # type: ignore[arg-type]
+    assert g.resolved and g.f2p_passed == 1 and g.p2p_passed == 2
+    assert sum("tail -c +" in c for c in box.calls) >= 3  # several chunks
+    assert g.output.endswith("=== 3 passed ===\n")
 
 
 def _row(verdict: str, resolved: bool, **kw: Any) -> swe.Row:
