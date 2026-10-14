@@ -192,3 +192,62 @@ def test_other_contree_errors_still_raise() -> None:
     backend = ContreeBackend.__new__(ContreeBackend)
     with pytest.raises(ValueError):
         backend.run(_Image(), shell="x", cwd="/", env=None, timeout=1, files=None, keep=False)
+
+
+class ApiStatusCodeError(Exception):  # stands in for contree_sdk's (never imported here)
+    def __init__(self, status: int) -> None:
+        super().__init__(f"status={status}")
+        self.status = status
+
+
+class _FlakyImage:
+    """wait() raises ApiStatusCodeError(status) `failures` times, then returns a result."""
+
+    def __init__(self, failures: int, status: int = 500) -> None:
+        self.failures, self.status, self.calls = failures, status, 0
+
+    def run(self, **kw: object) -> _FlakyImage:
+        return self
+
+    def wait(self) -> object:
+        self.calls += 1
+        if self.calls <= self.failures:
+            raise ApiStatusCodeError(self.status)
+
+        class _Res:
+            stdout, stderr, exit_code = b"ok\n", b"", 0
+
+        return _Res()
+
+
+def test_contree_5xx_is_retried(monkeypatch: pytest.MonkeyPatch) -> None:
+    # 2026-10-14 pilot 3: a 500 on GET /operations/{id} aborted coolamqp's whole task (ERROR row).
+    from warden.sandbox import box
+
+    monkeypatch.setattr(box.time, "sleep", lambda s: None)
+    backend = box.ContreeBackend.__new__(box.ContreeBackend)
+    image = _FlakyImage(failures=box.SERVER_ERROR_RETRIES)
+    out = backend.run(image, shell="x", cwd="/", env=None, timeout=1, files=None, keep=False)
+    assert out[:3] == ("ok\n", "", 0)
+    assert image.calls == box.SERVER_ERROR_RETRIES + 1
+
+
+def test_contree_5xx_raises_after_retries(monkeypatch: pytest.MonkeyPatch) -> None:
+    from warden.sandbox import box
+
+    monkeypatch.setattr(box.time, "sleep", lambda s: None)
+    backend = box.ContreeBackend.__new__(box.ContreeBackend)
+    image = _FlakyImage(failures=99)
+    with pytest.raises(ApiStatusCodeError):
+        backend.run(image, shell="x", cwd="/", env=None, timeout=1, files=None, keep=False)
+    assert image.calls == box.SERVER_ERROR_RETRIES + 1
+
+
+def test_contree_4xx_is_not_retried() -> None:
+    from warden.sandbox import box
+
+    backend = box.ContreeBackend.__new__(box.ContreeBackend)
+    image = _FlakyImage(failures=1, status=403)
+    with pytest.raises(ApiStatusCodeError):
+        backend.run(image, shell="x", cwd="/", env=None, timeout=1, files=None, keep=False)
+    assert image.calls == 1

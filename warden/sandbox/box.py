@@ -55,6 +55,9 @@ class SandboxBackend(Protocol):
 
 
 TIMEOUT_EXIT = 124
+# Sandboxes API 5xx: retry the whole run (each run is a new fork) this many times, backing off.
+SERVER_ERROR_RETRIES = 2
+SERVER_ERROR_BACKOFF = 5.0  # seconds × attempt
 
 
 class ContreeBackend:
@@ -96,15 +99,26 @@ class ContreeBackend:
             kwargs["env"] = env
         if files:
             kwargs["files"] = files
-        try:
-            res = image.run(**kwargs).wait()  # run() only prepares; wait() executes
-        except Exception as err:
-            # contree_sdk's OperationTimedOutError, matched by name so the SDK stays a lazy
-            # import. Exit code, not exception: a slow command is evidence for the caller (124 is
-            # timeout(1)'s convention). No checkpoint survives a timed-out run.
-            if type(err).__name__ != "OperationTimedOutError":
-                raise
-            return "", f"warden: command timed out after {timeout} s", TIMEOUT_EXIT, None, ""
+        attempt = 0
+        while True:
+            try:
+                res = image.run(**kwargs).wait()  # run() only prepares; wait() executes
+                break
+            except Exception as err:
+                # contree_sdk's errors, matched by name so the SDK stays a lazy import.
+                # OperationTimedOutError → exit code, not exception: a slow command is evidence
+                # for the caller (124 is timeout(1)'s convention); no checkpoint survives it.
+                if type(err).__name__ == "OperationTimedOutError":
+                    msg = f"warden: command timed out after {timeout} s"
+                    return "", msg, TIMEOUT_EXIT, None, ""
+                # A 5xx (e.g. 500 on GET /operations/{id}) is the service, not the command: a
+                # sandbox run is a fresh fork, so running it again is safe.
+                status = getattr(err, "status", None)
+                server_error = isinstance(status, int) and status >= 500
+                if not server_error or attempt >= SERVER_ERROR_RETRIES:
+                    raise
+                attempt += 1
+                time.sleep(SERVER_ERROR_BACKOFF * attempt)
         stdout = res.stdout.decode() if isinstance(res.stdout, bytes) else str(res.stdout or "")
         stderr = res.stderr.decode() if isinstance(res.stderr, bytes) else str(res.stderr or "")
         if not keep:
