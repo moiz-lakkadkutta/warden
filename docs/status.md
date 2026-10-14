@@ -244,6 +244,26 @@ smoke's $2 (an earlier 25-turn attempt was stopped at $0.57).
 - The budget skip uses the costliest candidate so far as the estimate: at $0.65 cap a $0.33
   candidate leaves room for 1-2. For N=3 use `--max-usd 1.5`.
 
+### 1h. B3 implementer fixes from pilot 3 (2026-10-14): clobber guard, replace_in_file, finish nudge
+
+Offline only (fake sandbox, scripted LLM); not yet measured live.
+- **Clobber guard.** Super wrote a 309-byte fragment over 19 kB pennylane `exp.py` and spent the
+  remaining ~30 turns recovering. `write_file` now refuses to shrink a file of >= 1 kB below half
+  its size; the error names both sizes and points at `replace_in_file`. `allow_shrink=true`
+  overrides. A refusal counts as a turn, the `tool` event carries
+  `refused={reason, old_bytes, new_bytes}`, and the implementer emits a `refused_shrink` note.
+  Each `write_file` now costs one extra `cat` (sandbox exec, no fork).
+- **`replace_in_file(path, old, new)`.** A sixth tool. `old` must match exactly once, and a miss
+  or an ambiguous match is a turn with an error. The test-deletion guard and `tests_added`
+  tracking cover it. The prompt now steers edits to it, which departs from the plan's
+  "whole-file rewrites only" (B3). The prompt hash changed.
+- **Finish nudge.** 7 of 10 pilot-3 runs used all 40 turns. fromager's new tests were green at
+  turn 10, and the implementer never called `finish`. After a test command exits 0 with new tests
+  written and no edit since, two turns without `finish` get one user note ("Your new tests
+  pass..."), at most once per run, plus a `finish_nudge` event.
+- To measure on the next eval, count from events: `refused_shrink` and `finish_nudge` notes,
+  `replace_in_file` calls vs `write_file`, and turns-to-finish.
+
 ### 1a. Earlier notes: blocked by Token Factory billing (resolved)
 
 `warden run --issue 196 --at 43f3851^ --yes` (run `20261010-111217-7c89`) fetched the issue, then
