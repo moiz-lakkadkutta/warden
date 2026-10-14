@@ -56,23 +56,30 @@ schema / security changes are labelled `PENDING-HUMAN`. Warden never merges.
 
 ## Results
 
-SWE-rebench pilot, 10 tasks (`warden eval --n 10 --seed 7`, $1/task cap, 40 tool turns). Every
-row is in [`evals/swe_rebench/results.csv`](evals/swe_rebench/results.csv); the task ids are in
-[`task_ids.txt`](evals/swe_rebench/task_ids.txt). "Resolved" means the dataset's hidden tests
-pass, and Warden never sees those tests.
+SWE-rebench pilots, the same 10 tasks (`warden eval --n 10 --seed 7`, $1/task cap, 40 tool
+turns; pilot 3's last two tasks ran at $0.40 to stay inside its budget). Every row is in [`evals/swe_rebench/results.csv`](evals/swe_rebench/results.csv) (pilot 2)
+and [`evals/swe_rebench/pilot-3/results.csv`](evals/swe_rebench/pilot-3/results.csv) (pilot 3); the
+task ids are in [`task_ids.txt`](evals/swe_rebench/task_ids.txt). "Resolved" means the dataset's
+hidden tests pass, and Warden never sees those tests.
 
-| metric | pilot 2 (2026-10-14) |
-|---|---|
-| Resolved | **4 / 10** |
-| Verifier PASS that hidden tests reject (false PASS) | 3 of 5 PASS |
-| Verifier FAIL on a fix hidden tests accept (false FAIL) | 1 of 5 FAIL (ran out of turns before writing a test) |
-| Unverified (FAIL only because the suite timed out) | 1 |
-| Theater catches (new test already passes on the unfixed base) | 1 |
-| Cost | **$0.13 / task**, $1.33 total |
+| metric | pilot 2 | pilot 3 (+ regression check, spec review) |
+|---|---|---|
+| Resolved | **4 / 10** | **1 / 10** |
+| Verifier PASS that hidden tests reject (false PASS) | 3 of 5 PASS | 1 of 1 PASS |
+| Verifier FAIL on a fix hidden tests accept (false FAIL) | 1 of 5 FAIL (ran out of turns before writing a test) | 1 of 8 FAIL (ran out of turns; no test) |
+| Unverified (FAIL only because the suite timed out) | 1 | 0 |
+| Harness error | 0 | 1 (Sandboxes API 500; retry added) |
+| Theater catches (new test already passes on the unfixed base) | 1 | 0 |
+| Cost | **$0.13 / task**, $1.33 total | **$0.18 / task**, $1.78 total |
 
-Pilot 2 ran *before* the regression check and spec review existed. All three false PASSes came
-from the implementer fixing its own reading of the issue, which is the failure those two checks
-target. The next eval measures them. At 10 tasks these numbers are a pilot, not a benchmark.
+What pilot 3 shows about the new checks: the regression check stopped one false PASS (planet: the
+fix broke catalog requests, and the hidden tests fail there too). It missed one: on spikeinterface
+it did not select the module's own test file, so it never ran. On pamqp it flagged tests the
+upstream fix changes on purpose. The resolved count fell from 4 to 1, and that is not the
+verifier, because hidden tests grade the fix. The implementer code was unchanged, and Super's tool
+use varied run to run (one clobbered a 19 kB file with a 309-byte fragment; 7 of 10 runs used all
+40 turns). The same task resolves in some runs and not in others. At 10 tasks and one run each,
+these numbers are a pilot, not a benchmark; details in `docs/status.md` §1e.
 
 ## How it works
 
