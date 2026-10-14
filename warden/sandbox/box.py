@@ -55,8 +55,10 @@ class SandboxBackend(Protocol):
 
 
 TIMEOUT_EXIT = 124
-# Sandboxes API 5xx: retry the whole run (each run is a new fork) this many times, backing off.
+# Sandboxes API 5xx, or a poll that timed out / lost its connection: retry the whole run (each run
+# is a new fork) this many times, backing off.
 SERVER_ERROR_RETRIES = 2
+TRANSIENT_ERRORS = frozenset({"ApiTimeoutError", "ContreeTransportError"})
 SERVER_ERROR_BACKOFF = 5.0  # seconds × attempt
 
 
@@ -111,11 +113,13 @@ class ContreeBackend:
                 if type(err).__name__ == "OperationTimedOutError":
                     msg = f"warden: command timed out after {timeout} s"
                     return "", msg, TIMEOUT_EXIT, None, ""
-                # A 5xx (e.g. 500 on GET /operations/{id}) is the service, not the command: a
-                # sandbox run is a fresh fork, so running it again is safe.
+                # A 5xx (e.g. 500 on GET /operations/{id}), a read timeout or a dropped
+                # connection is the service, not the command: a sandbox run is a fresh fork, so
+                # running it again is safe.
                 status = getattr(err, "status", None)
                 server_error = isinstance(status, int) and status >= 500
-                if not server_error or attempt >= SERVER_ERROR_RETRIES:
+                transient = server_error or type(err).__name__ in TRANSIENT_ERRORS
+                if not transient or attempt >= SERVER_ERROR_RETRIES:
                     raise
                 attempt += 1
                 time.sleep(SERVER_ERROR_BACKOFF * attempt)

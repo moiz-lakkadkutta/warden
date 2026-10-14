@@ -251,3 +251,38 @@ def test_contree_4xx_is_not_retried() -> None:
     with pytest.raises(ApiStatusCodeError):
         backend.run(image, shell="x", cwd="/", env=None, timeout=1, files=None, keep=False)
     assert image.calls == 1
+
+
+class ApiTimeoutError(Exception):  # contree_sdk's read timeout on GET /operations/{id}
+    pass
+
+
+class ContreeTransportError(Exception):  # contree_sdk's dropped connection (ReadError)
+    pass
+
+
+class _TransientImage(_FlakyImage):
+    def __init__(self, failures: int, exc: type[Exception]) -> None:
+        super().__init__(failures)
+        self.exc = exc
+
+    def wait(self) -> object:
+        if self.calls < self.failures:
+            self.calls += 1
+            raise self.exc("transient")
+        return super().wait()
+
+
+@pytest.mark.parametrize("exc", [ApiTimeoutError, ContreeTransportError])
+def test_contree_transient_transport_errors_are_retried(
+    monkeypatch: pytest.MonkeyPatch, exc: type[Exception]
+) -> None:
+    # 2026-10-14 E1: 7 of 49 tasks ended ERROR on a read timeout / ReadError polling
+    # GET /operations/{id}; a sandbox run is a fresh fork, so running it again is safe.
+    from warden.sandbox import box
+
+    monkeypatch.setattr(box.time, "sleep", lambda s: None)
+    backend = box.ContreeBackend.__new__(box.ContreeBackend)
+    image = _TransientImage(failures=box.SERVER_ERROR_RETRIES, exc=exc)
+    out = backend.run(image, shell="x", cwd="/", env=None, timeout=1, files=None, keep=False)
+    assert out[:3] == ("ok\n", "", 0)
