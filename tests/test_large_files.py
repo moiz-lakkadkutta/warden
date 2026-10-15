@@ -264,3 +264,24 @@ def test_the_tool_descriptions_state_the_limits() -> None:
     desc = {t["function"]["name"]: t["function"]["description"] for t in TOOL_SCHEMAS}
     assert "200" in desc["read_file"]
     assert "300 lines" in desc["write_file"] and "replace_in_file" in desc["write_file"]
+
+
+def test_the_second_idle_nudge_switches_edit_mode_on(log: EventLog) -> None:
+    env = Env(log)
+    script = [read(start_line=i * 10 + 1, end_line=i * 10 + 5) for i in range(20)]
+    llm = ScriptedLLM([*script, finish_turn(done=False, unmet=["x"])], log=log)
+    run_implementer(
+        llm,
+        env.base,
+        env.plan,
+        log,
+        dispatcher=env.dispatcher,
+        max_tool_turns=19,
+        idle_nudge_after=8,
+    )
+    assert "read_file" in _names(llm.calls[8].tools)  # first nudge: a note only
+    assert "read_file" not in _names(llm.calls[16].tools)  # second: edit mode as well
+    modes = _notes(log, "edit_mode")
+    assert [(m["tool_turns"], m.get("after")) for m in modes] == [(16, "nudge")]
+    users = [m["content"] for m in llm.calls[16].messages if m["role"] == "user"]
+    assert "switched off" in users[-1]

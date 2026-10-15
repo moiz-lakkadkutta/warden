@@ -312,8 +312,11 @@ REREAD_STOP_MSG = (
 # file on #196, 13 of them escalated, and no edit). After an escalated answer the next model calls
 # are sent without the read-only tools, until it edits a file, runs a command or EDIT_MODE_TURNS
 # turns pass: it can write, replace, run or finish, nothing else.
+# The idle nudge alone did not either (camp-replay-212-c-205: 27 reads, 4 nudges, no source
+# edit), so from the EDIT_MODE_AFTER_NUDGES-th idle nudge of a run it switches edit mode on too.
 READ_ONLY_TOOLS = frozenset({"list_files", "read_file", "grep"})
 EDIT_MODE_TURNS = 3
+EDIT_MODE_AFTER_NUDGES = 2
 EDIT_MODE_MSG = (
     "read_file, grep and list_files are switched off for your next turns: you have the text. "
     "Make the edit (replace_in_file / write_file), run the tests (run_shell), or finish."
@@ -599,6 +602,7 @@ def run_implementer(
     page = dispatch.read_page_lines
     edit_mode_until = 0  # while turns < this, the read-only tools are withheld
     edit_mode_pending = False  # tell the model, after the current batch
+    idle_nudges = 0
     edit_tools = [t for t in tools if t["function"]["name"] not in READ_ONLY_TOOLS]
 
     def ready(at: Box) -> tuple[Box, str]:
@@ -813,6 +817,11 @@ def run_implementer(
         ):
             left = max(0, max_tool_turns - turns)
             nudge = IDLE_NUDGE.format(idle=idle, left=left, budget=max_tool_turns)
+            idle_nudges += 1
+            if idle_nudges >= EDIT_MODE_AFTER_NUDGES:
+                edit_mode_until = turns + EDIT_MODE_TURNS
+                nudge = f"{nudge}\n{EDIT_MODE_MSG}"
+                note("edit_mode", tool_turns=turns, until_turn=edit_mode_until, after="nudge")
             messages.append({"role": "user", "content": nudge})
             note("nudge", idle=idle, tool_turns=turns)
             hooks.step(f"nudge: {idle} turns without an edit")
