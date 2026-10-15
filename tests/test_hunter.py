@@ -231,6 +231,22 @@ def test_boot_command_is_dash_safe() -> None:
     assert "[[" not in cmd and "$RANDOM" not in cmd
 
 
+def test_boot_command_replay_migrates_scratch_db() -> None:
+    cmd = boot_command(at_rev="d9c37cb^", workdir="/src")
+    assert "git checkout -q --detach d9c37cb^" in cmd
+    assert "cd /src" in cmd
+    assert "CREATE DATABASE warden_replay" in cmd and "DROP DATABASE IF EXISTS warden_replay" in cmd
+    assert "alembic upgrade head" in cmd
+    # the app boots against the scratch DB, not the seeded demo
+    assert "warden_replay" in cmd and "fabric_demo" not in cmd
+
+
+def test_boot_command_default_uses_seeded_demo() -> None:
+    cmd = boot_command()
+    assert "fabric_demo" in cmd
+    assert "alembic upgrade head" not in cmd and "git checkout" not in cmd
+
+
 def test_probe_py_has_marker_substituted() -> None:
     src = probe_py()
     assert "__MARKER__" not in src and MARKER in src

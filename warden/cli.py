@@ -372,6 +372,14 @@ def hunt(
             "--register", help="Fabric clone whose known-issues register labels re-finds."
         ),
     ] = None,
+    at: Annotated[
+        str | None,
+        typer.Option(
+            "--at",
+            help="Historical replay: check this commit out in the fork and probe its schema on a "
+            "fresh scratch DB (e.g. --at d9c37cb^ to hunt a bug since fixed on main).",
+        ),
+    ] = None,
     plain: Annotated[bool, typer.Option(help="No colour or animation.")] = False,
 ) -> None:
     """Hunt an axis against the seeded demo tenant in a fork and file confirmed findings.
@@ -407,10 +415,13 @@ def hunt(
         from warden.sandbox.box import open_base
 
         box = open_base(s, log, phase="hunt")
-        _err(f"booting Fabric in a fork of {s.base_image} and probing (axis: {axis})…")
+        at_note = f" at {at}" if at else ""
+        _err(f"booting Fabric in a fork of {s.base_image}{at_note} and probing (axis: {axis})…")
+        if at:
+            log.emit("hunt", "note", {"replay_at": at})
         report = run_hunt(
             axis,
-            SandboxProber(box, log, shell_wrap=s.shell_wrap),
+            SandboxProber(box, log, shell_wrap=s.shell_wrap, at_rev=at, workdir=s.workdir),
             baseline=baseline,
             log=log,
             reproduce=repro_times,
