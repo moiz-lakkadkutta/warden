@@ -21,6 +21,7 @@ from warden.ui import fail
 
 if TYPE_CHECKING:
     from warden.config import Settings
+    from warden.hunt.hunter import HuntReport
     from warden.hunt.issue import EventIssue
     from warden.runlog.events import EventLog
     from warden.schemas import Phase
@@ -344,6 +345,112 @@ def _detect_test_cmd(repo: Path, app_dir: str) -> tuple[str, str]:
         if (root / "Cargo.toml").exists():
             return "cargo", "cargo test"
     return "unknown", ""
+
+
+# ------------------------------------------------------------------------------ hunt
+
+_FABRIC_CLONE_DEFAULTS = (Path("/Users/moizp/fabric"), Path.home() / "fabric")
+
+
+@app.command()
+def hunt(
+    axis: Annotated[
+        str, typer.Option("--axis", help="Probe axis to run (currently: idor).")
+    ] = "idor",
+    no_file: Annotated[
+        bool, typer.Option("--no-file", help="Dry run: print findings, open no GitHub issues.")
+    ] = False,
+    repro_times: Annotated[
+        int, typer.Option("--repro-times", help="Runs a finding must reproduce in before filing.")
+    ] = 2,
+    repo: Annotated[
+        str | None, typer.Option("--repo", help="Target repo for filed issues (owner/name).")
+    ] = None,
+    register: Annotated[
+        Path | None,
+        typer.Option(
+            "--register", help="Fabric clone whose known-issues register labels re-finds."
+        ),
+    ] = None,
+    plain: Annotated[bool, typer.Option(help="No colour or animation.")] = False,
+) -> None:
+    """Hunt an axis against the seeded demo tenant in a fork and file confirmed findings.
+
+    Deterministic probing: no model spend. Findings reproduce `--repro-times` before filing;
+    others are logged as plausible and dropped.
+    """
+    from warden.config import load_settings
+    from warden.hunt.baseline import Baseline
+    from warden.hunt.hunter import SUPPORTED_AXES, fabric_baseline, run_hunt
+    from warden.runlog.events import EventLog
+
+    _plain_override(plain)
+    s = load_settings()
+    if axis not in SUPPORTED_AXES:
+        fail(f"--axis {axis!r} is not implemented", fix=f"one of: {sorted(SUPPORTED_AXES)}", code=2)
+    target = repo or s.target_repo
+    log = EventLog(s.runs_dir, json_stream=None)
+    _err(f"run_id {log.run_id}   (events: runs/{log.run_id}/events.jsonl)")
+
+    with _guarded(log):
+        missing = s.missing_for("NEBIUS_API_KEY", "CONTREE_BASE_URL", "NEBIUS_PROJECT_ID")
+        if missing:
+            _fail_run(log, f"missing {', '.join(missing)}", fix="run `warden doctor`", code=2)
+        clone = _resolve_register(register)
+        baseline = fabric_baseline(clone) if clone else Baseline()
+        _err(
+            f"baseline: {len(baseline.ids)} known ids from {baseline.path}"
+            if baseline.path
+            else "baseline: no register found (re-finds will not be labelled regressions)"
+        )
+        from warden.hunt.axes.idor import SandboxProber
+        from warden.sandbox.box import open_base
+
+        box = open_base(s, log, phase="hunt")
+        _err(f"booting Fabric in a fork of {s.base_image} and probing (axis: {axis})…")
+        report = run_hunt(
+            axis,
+            SandboxProber(box, log, shell_wrap=s.shell_wrap),
+            baseline=baseline,
+            log=log,
+            reproduce=repro_times,
+        )
+        _report_hunt(log, report, target, no_file=no_file)
+
+
+def _resolve_register(register: Path | None) -> Path | None:
+    if register is not None:
+        return register if register.is_dir() else None
+    return next((p for p in _FABRIC_CLONE_DEFAULTS if p.is_dir()), None)
+
+
+def _report_hunt(log: EventLog, report: HuntReport, repo: str, *, no_file: bool) -> None:
+    from warden.hunt.filer import file_findings
+
+    _err(
+        f"probed {report.endpoints_enumerated} id-taking endpoints over {report.runs} run(s); "
+        f"{len(report.confirmed)} confirmed, {len(report.plausible)} plausible"
+    )
+    if report.probe_error:
+        _err(f"probe error: {report.probe_error}")
+    for f in report.confirmed:
+        reg = f" [regression {f.regression_of}]" if f.regression_of else ""
+        _err(f"  {_mark(True)} {f.severity} {f.title}{reg} (×{f.reproduced_times})")
+    for f in report.plausible:
+        _err(f"  · plausible {f.severity} {f.title} (×{f.reproduced_times}) — not filed")
+    if not report.confirmed:
+        _err("no confirmed findings to file")
+        log.result(axis=report.axis, confirmed=0, filed=[])
+        return
+    filed = file_findings(report.confirmed, repo, no_file=no_file, log=log)
+    for fi in filed:
+        where = "would file" if fi.dry_run else (fi.url or "filed")
+        _err(f"  {fi.title} -> {where}")
+    log.result(
+        axis=report.axis,
+        confirmed=len(report.confirmed),
+        filed=[{"title": fi.title, "url": fi.url, "number": fi.number} for fi in filed],
+    )
 
 
 # ------------------------------------------------------------------------------- run

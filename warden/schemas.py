@@ -48,6 +48,13 @@ class Finding(BaseModel):
     confirmed: bool = False
     reproduced_times: int = 0
     root_cause_key: str = Field(description="Stable key so findings with one cause group together.")
+    impact: str = Field(
+        default="", description="Who or what is affected if the bug is exploited (filer body)."
+    )
+    regression_of: str | None = Field(
+        default=None,
+        description="The known-issue register id this re-finds (e.g. 'SEC-1'); None if novel.",
+    )
 
 
 class ProbePlan(BaseModel):
