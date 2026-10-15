@@ -30,25 +30,49 @@ MARKER = "__WARDEN_IDOR_RESULT__"
 DEFAULT_DB_URL = "postgresql+asyncpg://fabric_app:fabric_app_dev@127.0.0.1:5432/fabric_demo"
 
 
+# Superuser (dev warns, not refuses) used to create + migrate the scratch DB for a replay.
+# The base image's superuser is `postgres` (local trust auth — no password); there is no `fabric`.
+SCRATCH_DB = "warden_replay"
+SUPERUSER_URL = "postgresql+asyncpg://postgres@127.0.0.1:5432/" + SCRATCH_DB
+_ADMIN_PSQL = "postgresql://postgres@127.0.0.1:5432/postgres"
+
+
 def boot_command(
     *,
     db_url: str = DEFAULT_DB_URL,
     port: int = 8000,
     probe_path: str = "/tmp/warden_idor_probe.py",
-    ready_timeout: int = 90,
+    ready_timeout: int = 120,
+    at_rev: str | None = None,
+    workdir: str = "/src",
 ) -> str:
-    """A dash (POSIX sh) command: boot uvicorn against fabric_demo, wait for /ready, run the probe.
+    """A dash (POSIX sh) command: boot uvicorn, wait for /ready, run the probe.
 
-    No bash-isms (the image shell is dash). uvicorn and python are on PATH via the app venv.
+    Default: boot against the seeded ``fabric_demo``. With ``at_rev`` (a historical replay), check
+    that commit out at ``workdir`` (``/app`` is ``workdir/backend``), create a fresh scratch DB,
+    ``alembic upgrade head`` to *that commit's* schema, and boot against it — signup auto-seeds the
+    catalogue, so no demo data is needed and the newer seeded DB is left untouched. The installed
+    venv is reused (deps are unchanged across the range). No bash-isms (the image shell is dash).
     """
+    if at_rev is None:
+        prep = f'export DATABASE_URL="{db_url}"'
+    else:
+        prep = f"""cd {workdir}
+git checkout -q --detach {at_rev}
+cd /app
+export DATABASE_URL="{SUPERUSER_URL}"
+export MIGRATION_DATABASE_URL="{SUPERUSER_URL}"
+echo "warden: creating scratch DB {SCRATCH_DB} and migrating to {at_rev}" >&2
+psql "{_ADMIN_PSQL}" -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS {SCRATCH_DB}" -c "CREATE DATABASE {SCRATCH_DB}"
+alembic upgrade head"""
     return f"""
 set -e
 cd /app
 export ENVIRONMENT=dev
-export DATABASE_URL="{db_url}"
 export JWT_SECRET="warden-dev-probe-secret-0123456789abcdef"
 export SIGNUP_RATE_LIMIT_MAX_REQUESTS=1000
 export MFA_REQUIRED_FOR_ADMIN=false
+{prep}
 uvicorn main:app --host 127.0.0.1 --port {port} >/tmp/warden_uvicorn.log 2>&1 &
 UV=$!
 READY=0

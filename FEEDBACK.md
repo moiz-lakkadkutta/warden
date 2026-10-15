@@ -177,6 +177,19 @@ Every entry: date · tool · what happened · numbers · what would have helped.
   7 of 10 tasks used all 40 turns (pilot 2: 5). → guidance on which edit-tool shape Super is
   trained on (whole file vs str_replace vs unified diff) would let agents pick the one it uses
   reliably.
+- 2026-10-15 · C5 replay (#225) · Nemotron 3 Ultra exhausted its completion budget on reasoning
+  before emitting the `Plan` JSON, three calls in a row (run 20261015-165152-7771): each call hit
+  `max_tokens=16384` exactly, 43–51 s each, and `content` began with prose ("The user is asking me
+  to…") instead of JSON — strict `json_schema` did not stop it, and the `json_object` fallback
+  failed the same way. **$0.27 for no plan.** The same prompt planned fine on the runs before and
+  after. The input was an issue with six curl repros (~6 kB). → a server-side cap on reasoning
+  tokens (or a guarantee that structured-output mode reserves room for the answer) would make
+  `response_format` dependable for long inputs.
+- 2026-10-15 · C5 replay (#225) · the Super read-loop again, on a 6-endpoint security fix at
+  Fabric `d9c37cb^`: with 60 turns (run 20261015-165529-50c3) Super made 25 `read_file` + 13 `grep`
+  calls and only 2 edits — both to the test file — and never wrote the guard. Its repro test was
+  right (POST /items → 201 on the unfixed base) but stayed red. With 25 turns (20261015-163738-774e)
+  it also stopped mid-fix. → same ask as above: a tool-use preset that curbs re-reading.
 - (fill in after Phase B3) Lightning as a tool router: turn count, wrong-tool rate.
 
 ## Nebius Serverless

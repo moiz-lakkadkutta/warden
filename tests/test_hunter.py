@@ -231,6 +231,22 @@ def test_boot_command_is_dash_safe() -> None:
     assert "[[" not in cmd and "$RANDOM" not in cmd
 
 
+def test_boot_command_replay_migrates_scratch_db() -> None:
+    cmd = boot_command(at_rev="d9c37cb^", workdir="/src")
+    assert "git checkout -q --detach d9c37cb^" in cmd
+    assert "cd /src" in cmd
+    assert "CREATE DATABASE warden_replay" in cmd and "DROP DATABASE IF EXISTS warden_replay" in cmd
+    assert "alembic upgrade head" in cmd
+    # the app boots against the scratch DB, not the seeded demo
+    assert "warden_replay" in cmd and "fabric_demo" not in cmd
+
+
+def test_boot_command_default_uses_seeded_demo() -> None:
+    cmd = boot_command()
+    assert "fabric_demo" in cmd
+    assert "alembic upgrade head" not in cmd and "git checkout" not in cmd
+
+
 def test_probe_py_has_marker_substituted() -> None:
     src = probe_py()
     assert "__MARKER__" not in src and MARKER in src
@@ -298,6 +314,20 @@ def test_issue_title_marks_regression() -> None:
     f = finding("k", title="cross firm write")
     f.regression_of = "SEC-1"
     assert issue_title([f]).startswith("[P1] [regression SEC-1]")
+
+
+def test_grouped_title_prefers_regression_head_and_prefix() -> None:
+    plain = finding("idor:cross_firm_write", title="cross firm write: POST /cost-centres")
+    reg = finding("idor:cross_firm_write", title="cross firm write: POST /parties")
+    reg.regression_of = "SEC-1"
+    # even though the plain finding is first, the title uses the regression-labelled one
+    title = issue_title([plain, reg], prefix="[replay] ")
+    assert title == "[replay] [P1] [regression SEC-1] cross firm write: POST /parties"
+
+
+def test_format_body_preamble_is_prepended() -> None:
+    body = format_body([finding("k")], preamble="> already fixed on main")
+    assert body.startswith("> already fixed on main")
 
 
 def test_file_findings_dry_run_opens_nothing() -> None:

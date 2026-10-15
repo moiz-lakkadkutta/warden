@@ -154,11 +154,14 @@ class SandboxProber:
     shell_wrap: str = "with-services sh -c"
     probe_path: str = "/tmp/warden_idor_probe.py"
     timeout: int = PROBE_TIMEOUT
+    # Historical replay: check this commit out at `workdir` and probe its schema on a scratch DB.
+    at_rev: str | None = None
+    workdir: str = "/src"
 
     def probe(self) -> IdorRun:
         from warden.hunt.axes.probe_script import boot_command, parse_probe_output, probe_py
 
-        command = boot_command(probe_path=self.probe_path)
+        command = boot_command(probe_path=self.probe_path, at_rev=self.at_rev, workdir=self.workdir)
         shell = f"{self.shell_wrap} {shlex.quote(command)}" if self.shell_wrap else command
         res = self.box.run(
             shell,

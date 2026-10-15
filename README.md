@@ -30,6 +30,13 @@ with its branch tree:
   files. On current Fabric it **finds no cross-tenant hole and files nothing**: org-level reads are
   isolated (422) and the firm-in-org guard holds across 8 `firm_id` endpoints, independently
   confirming the Wave-B isolation fix. Deterministic — **$0 of model spend** per hunt.
+- **Hunter replay at the pre-fix commit (`--at d9c37cb^`):** it confirmed the cross-firm write on 6
+  endpoints (2× each) and filed
+  [Fabric-Inventory#225](https://github.com/moiz-lakkadkutta/Fabric-Inventory/issues/225), labelled
+  as a regression of the register entry and as already fixed on main. The fix step did **not**
+  pass: across 3 attempts ($1.49) the Super candidates guarded the router layer, not the service
+  layer where the human fix lives. Their repro tests stayed red, so the verifier rejected them and
+  **no PR was opened**.
 - SWE-rebench on Nebius's preloaded task images: see [Results](#results).
 
 ## Runs on Nebius
