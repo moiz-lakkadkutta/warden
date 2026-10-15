@@ -24,10 +24,13 @@ budget; report which acceptance items are unmet.
 - `replace_in_file` edits an existing file: `old` is the exact text from `read_file`
   (indentation and blank lines included) and must occur exactly once; add a few surrounding lines
   when it is not unique. It works on large files without reading every page.
-- `write_file` replaces the WHOLE file: never send a fragment. A write that would shrink a file
-  of 1 kB or more below half its size is refused; read every page and send the complete file, or
-  use `replace_in_file`. `allow_shrink=true` only when deleting most of a file is the intent.
-- Long files arrive in pages; follow the `start_line` hint to read further.
+- `write_file` creates a new file or replaces a small one WHOLE: never send a fragment. It is
+  refused on an existing file over 300 lines or 12 kB, and a write that would shrink a file of
+  1 kB or more below half its size is refused; use `replace_in_file`. To add a test at the end of
+  a long test file, `replace_in_file` with its last few lines as `old`, or write a new, short test
+  file. `allow_shrink=true` only when deleting most of a small file is the intent.
+- `read_file` returns at most 200 lines per call; pass `start_line`/`end_line` (or `grep`) to get
+  the part you need. Read each part once: what you were shown stays in this conversation.
 - Paths are relative to the repo root, exactly as in the plan (e.g. `backend/app/...`);
   commands run there with a 600 s limit and with the database already started.
 

@@ -293,6 +293,19 @@ REREAD_MSG = (
     "read_file result is still in this conversation. You already have it — now write the test "
     "or make the edit with replace_in_file or write_file, or run the tests with run_shell."
 )
+# Fabric campaign (camp-replay-212-b-200): after the note, Super asked for the same 14-line tail
+# of an 813-line test file 40 more times in one candidate (44 of its 60 turns). From the
+# REREAD_ESCALATE_AFTER+1-th cached answer for one file (since it last changed) the note says
+# plainly that reading again cannot help and names the only useful next calls.
+REREAD_ESCALATE_AFTER = 2
+REREAD_STOP_MSG = (
+    "STOP re-reading {path}: this is request {n} for text you already have. Lines {first}-{last} "
+    "are unchanged and were shown to you at turn {turn}; they are in this conversation, and "
+    "reading again shows nothing new. Your next call must be one of: replace_in_file (to add a "
+    "test at the end of a long file, pass its last few lines as `old` and those lines plus the "
+    "new test as `new`), write_file for a NEW short test file, run_shell to run the tests, or "
+    "finish (done=false with the unmet items if you are stuck)."
+)
 RESENT_PREFIX = "[unchanged since turn {turn}; re-sent because that output was elided]\n"
 IDLE_NUDGE = (
     "You have spent {idle} tool turns in a row reading and searching without write_file or "
@@ -311,6 +324,18 @@ FINISH_NUDGE = (
 )
 _TEST_CMD = re.compile(r"(?<![\w.-])(pytest|py\.test|unittest|tox|nox)(?![\w-])")
 
+# Auto-finish. Campaign + hunter replays: 13 of 15 Fabric attempts never called `finish`, and the
+# hunter replay 20261015-175548-8d5d's chosen candidate (service-layer fix, valid repro) went green
+# at turn 58 of 60 and was then marked "did not finish" by the verifier. A candidate with new tests,
+# a source edit and a green test run is finished by Warden instead: AUTO_FINISH_AFTER turns after the
+# green run without another edit or `finish`, or at the turn cap, once Warden has re-run the new
+# tests and the lint command itself (both outside the turn budget). The verifier still judges it.
+AUTO_FINISH_AFTER = 4
+AUTO_FINISH_DECLINED = (
+    "Warden checked your work before finishing for you and it is not ready: {why}. Fix that, run "
+    "the tests again, then call finish."
+)
+
 
 @dataclass(frozen=True)
 class _Served:
@@ -328,12 +353,21 @@ class ReadMemory:
     def __init__(self, root: str) -> None:
         self._root = root
         self._seen: dict[str, list[_Served]] = {}
+        self._repeats: dict[str, int] = {}
 
     def forget(self, path: str | None) -> None:
         if path is None:
             self._seen.clear()
+            self._repeats.clear()
         else:
             self._seen.pop(_norm(path, self._root), None)
+            self._repeats.pop(_norm(path, self._root), None)
+
+    def repeat(self, path: str) -> int:
+        """Count one more cached answer for `path` since it last changed; return the count."""
+        key = _norm(path, self._root)
+        self._repeats[key] = self._repeats.get(key, 0) + 1
+        return self._repeats[key]
 
     def record(self, path: str, first: int, last: int, total: int, turn: int, msg: int) -> None:
         self._seen.setdefault(_norm(path, self._root), []).append(
@@ -368,15 +402,21 @@ def _visible(messages: list[dict[str, Any]], idx: int) -> bool:
     return idx in tool_idx[-(KEEP_RECENT - 1) :]
 
 
-def _read_range(args: Any) -> tuple[str, int, int | None] | None:
-    """`(path, start_line, end_line)` of a read_file call, tolerated as the dispatcher would."""
+def _read_range(args: Any, page: int = 0) -> tuple[str, int, int | None] | None:
+    """`(path, start_line, end_line)` of a read_file call, tolerated as the dispatcher would.
+    With `page` (> 0) the end is the last line one call can serve: a whole-file read of a long
+    file returns its first page, so asking again is a repeat of that page."""
     fixed = tolerate_args("read_file", args).args
     if not isinstance(fixed, dict):
         return None
     path, start, end = fixed.get("path"), fixed.get("start_line", 1), fixed.get("end_line")
     if not isinstance(path, str) or not path.strip() or not isinstance(start, int):
         return None
-    return path, start, end if isinstance(end, int) else None
+    end = end if isinstance(end, int) else None
+    if page > 0:
+        last = start + page - 1
+        end = last if end is None else min(end, last)
+    return path, start, end
 
 
 def parse_finish(args: Any) -> FixReport | str:
@@ -532,6 +572,35 @@ def run_implementer(
     idle = 0  # tool turns since the last write_file / run_shell
     green_at: int | None = None  # turn of the last passing test run with no edit since
     finish_nudged = False
+    # a theater retry continues from the candidate, whose fix is already in `base`
+    src_edited = unfixed is not None  # a successful edit to a non-test file
+    auto_checked: int | None = None  # the green turn the auto-finish check last ran for
+    auto: str | None = None  # "green" | "cap": Warden finished for the model
+    page = dispatch.read_page_lines
+
+    def ready(at: Box) -> tuple[Box, str]:
+        """Warden's own check before finishing for the model, outside the turn budget: the new
+        tests pass and lint is clean (after `autofix`, kept only if it makes lint clean).
+        `(box to finish from, "")`, or `(box, why not)`."""
+        cmd = "pytest -q " + " ".join(shlex.quote(p) for p in tests_added)
+        res = dispatch.run(at, cmd, timeout=600)
+        if res.exit_code != 0:
+            tail = (res.stdout + res.stderr)[-300:].strip()
+            return at, f"`{cmd}` exits {res.exit_code}:\n{tail}"
+        if not lint:
+            return at, ""
+        checked = dispatch.run(at, lint, timeout=600)
+        if checked.exit_code == 0:
+            return at, ""
+        if autofix:
+            fixed = dispatch.run(at, autofix, timeout=600, keep=True)
+            if fixed.box is not None and dispatch.run(fixed.box, lint, timeout=600).ok:
+                return fixed.box, ""
+        tail = (checked.stdout + checked.stderr)[-300:].strip()
+        return at, f"`{lint}` exits {checked.exit_code}:\n{tail}"
+
+    def viable() -> bool:
+        return report is None and src_edited and bool(tests_added)
 
     def visible(idx: int) -> bool:
         return _visible(messages, idx)
@@ -621,7 +690,7 @@ def run_implementer(
                     base_file = _cat(base, path, root)
                     on_base[key] = base_file.ok
                     base_tests[key] = set(test_nodes(base_file.stdout)) if base_file.ok else set()
-            wanted = _read_range(args) if read_cache and name == "read_file" else None
+            wanted = _read_range(args, page) if read_cache and name == "read_file" else None
             resent: tuple[int, int, int] | None = None
             if wanted is not None:
                 rpath, rstart, rend = wanted
@@ -630,13 +699,24 @@ def run_implementer(
                     turns += 1
                     idle += 1
                     since, first, last = seen
+                    n = memory.repeat(rpath)
+                    escalated = n > REREAD_ESCALATE_AFTER
+                    fmt = REREAD_STOP_MSG if escalated else REREAD_MSG
                     messages.append(
                         _tool_message(
                             cid,
-                            REREAD_MSG.format(turn=since, path=rpath, first=first, last=last),
+                            fmt.format(turn=since, path=rpath, first=first, last=last, n=n + 1),
                         )
                     )
-                    note("reread", path=rpath, first=first, last=last, since_turn=since)
+                    note(
+                        "reread",
+                        path=rpath,
+                        first=first,
+                        last=last,
+                        since_turn=since,
+                        repeat=n,
+                        escalated=escalated,
+                    )
                     hooks.step(f"read_file {rpath} → unchanged since turn {since}")
                     continue
                 resent = memory.covering(rpath, rstart, rend, lambda _: True)
@@ -649,12 +729,14 @@ def run_implementer(
                 message["content"] = RESENT_PREFIX.format(turn=resent[0]) + message["content"]
             messages.append(message)
             if result.refused is not None and edit_path is not None:
+                reason = result.refused.get("reason")
                 note(
-                    "refused_shrink",
+                    "refused_large" if reason == "large" else "refused_shrink",
                     path=edit_path,
                     **{k: v for k, v in result.refused.items() if k != "reason"},
                 )
-                hooks.step(f"{name} {edit_path} → refused: would shrink the file")
+                why = "file too large to rewrite" if reason == "large" else "would shrink the file"
+                hooks.step(f"{name} {edit_path} → refused: {why}")
             mutating = name in (*EDIT_TOOLS, "run_shell") and result.exit_code is not None
             idle = 0 if mutating else idle + 1
             if name == "run_shell" and result.exit_code is not None:
@@ -670,6 +752,7 @@ def run_implementer(
                 )
             if edit_path is not None and result.ok:
                 memory.forget(edit_path)
+                src_edited = src_edited or not is_test_write
                 path = edit_path
                 first_write = path if first_write is None else first_write
                 key = _norm(path, root)
@@ -706,10 +789,31 @@ def run_implementer(
             note("finish_nudge", green_turn=green_at, tool_turns=turns)
             hooks.step(f"nudge: tests green since turn {green_at}, no finish")
             finish_nudged = True
+        if (
+            viable()
+            and turns < max_tool_turns
+            and green_at is not None
+            and auto_checked != green_at
+            and turns - green_at >= AUTO_FINISH_AFTER
+        ):
+            auto_checked = green_at
+            box, why = ready(box)
+            if not why:
+                auto = "green"
+                break
+            messages.append({"role": "user", "content": AUTO_FINISH_DECLINED.format(why=why)})
+            note("auto_finish_declined", green_turn=green_at, tool_turns=turns, why=why[:300])
+            hooks.step(f"auto-finish declined: {why.splitlines()[0]}")
 
-    if report is None:
+    if report is None and auto is None:
         note("budget", tool_turns=turns)
         hooks.step(f"tool budget exhausted after {turns} turns")
+        if viable():  # the cap: finish from here when the work checks out
+            box, why = ready(box)
+            if not why:
+                auto = "cap"
+            else:
+                note("auto_finish_declined", green_turn=green_at, tool_turns=turns, why=why[:300])
     if autofix and first_write is not None:
         fixed = dispatch.run(box, autofix, timeout=600, keep=True)
         if fixed.box is not None:
@@ -717,23 +821,31 @@ def run_implementer(
         note("autofix", command=autofix, exit_code=fixed.exit_code, image_uuid=box.uuid)
     test_first = first_write is not None and is_test_path(first_write, plan, root)
     note("tdd_order", first_write=first_write, test_first=test_first)
+    final_exit: int | None = None
     if tests_added:
         cmd = "pytest -q " + " ".join(shlex.quote(p) for p in tests_added)
         final = dispatch.run(box, cmd, timeout=600)
+        final_exit = final.exit_code
         note(
             "final_tests",
             tests=list(tests_added),
             exit_code=final.exit_code,
             tail=(final.stdout + final.stderr)[-500:],
         )
-    outcome = "done" if report is not None and report.done else "blocked"
+    if auto is not None and final_exit != 0:
+        auto = None  # autofix broke the new tests: not finished after all
+    if auto is not None:
+        note("auto_finish", reason=auto, green_turn=green_at, tool_turns=turns)
+        hooks.step(f"auto-finish ({auto}): new tests green, source edited, lint clean")
+    done = (report is not None and report.done) or auto is not None
     note(
-        outcome,
+        "done" if done else "blocked",
         tool_turns=turns,
         tests_added=list(tests_added),
         cost_usd=round(cost, 6),
         image_uuid=box.uuid,
         report=None if report is None else report.model_dump(),
+        **({"auto_finish": auto} if auto is not None else {}),
     )
     return Candidate(
         issue=plan.issue,
@@ -741,5 +853,5 @@ def run_implementer(
         tool_turns=turns,
         tests_added=list(tests_added),
         cost_usd=round(cost, 6),
-        done=report is not None and report.done,
+        done=done,
     )

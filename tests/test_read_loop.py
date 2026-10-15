@@ -115,14 +115,17 @@ def test_rereading_an_unchanged_range_is_answered_without_the_content(log: Event
     ]
 
 
-def test_whole_file_reread_after_a_page_is_cached_only_when_fully_seen(log: EventLog) -> None:
+def test_whole_file_reread_is_a_repeat_of_its_first_page(log: EventLog) -> None:
+    # 300 lines, pages of 200: read() serves 1-200, so asking again is that page again; a read
+    # from line 7 reaches 201-206, which were never shown, and is served.
     env = Env(log)
     script = [read(), read(), read(start_line=7), finish_turn()]
     llm, _ = env.run(script, idle_nudge_after=0)
-    assert env.dispatcher.calls == 1
+    assert env.dispatcher.calls == 2
     msgs = _tool_msgs(llm)
-    assert msgs[1].startswith("unchanged since turn 1: src/recur.py lines 1-300")
-    assert msgs[2].startswith("unchanged since turn 1: src/recur.py lines 7-300")
+    assert "lines 1-200 of 300 shown" in msgs[0]
+    assert msgs[1].startswith("unchanged since turn 1: src/recur.py lines 1-200")
+    assert msgs[2].startswith("line 007\n") and "lines 7-206 of 300 shown" in msgs[2]
 
 
 def test_a_write_to_the_file_invalidates_its_reads(log: EventLog) -> None:
@@ -174,7 +177,7 @@ def test_an_elided_read_is_resent_with_a_note(log: EventLog) -> None:
     assert env.dispatcher.calls == KEEP_RECENT + 2
     last = _tool_msgs(llm)[-1]
     assert last.startswith("[unchanged since turn 1; re-sent because that output was elided]\n")
-    assert last.endswith("line 300\n")
+    assert "line 200\n" in last and "lines 1-200 of 300 shown" in last
     assert len("".join(LINES)) > ELIDE_MIN
 
 

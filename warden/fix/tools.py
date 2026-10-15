@@ -16,6 +16,12 @@ Write guards (pilot 3: Super wrote a 309-byte fragment over 19 kB pennylane exp.
 turns recovering): write_file refuses to shrink a file of SHRINK_MIN_BYTES or more below
 SHRINK_RATIO of its size unless `allow_shrink` is set, and replace_in_file edits one exact,
 unique span so large files never need a whole-file rewrite.
+
+Large-file guards (Fabric campaign, 2026-10-15: 13 of 15 attempts never called `finish`): read_file
+serves at most READ_PAGE_LINES lines per call with a "lines X-Y of N" footer, and write_file refuses
+to rewrite an existing file over LARGE_FILE_LINES lines or LARGE_FILE_BYTES bytes (a whole-file
+resend of a 926-line test file was cut at the 8192-token completion limit 7 times in one run); the
+refusal points at replace_in_file. A new file is never refused.
 """
 
 from __future__ import annotations
@@ -67,16 +73,16 @@ _DESCRIPTIONS: dict[str, str] = {
         "call this first to find code and tests."
     ),
     "read_file": (
-        "Return the contents of one file. Long files come in pages of whole lines with a note "
-        "telling you the start_line to pass to continue; read every page before write_file."
+        "Return the lines of one file, at most 200 per call. A longer file ends with a "
+        "'lines X-Y of N' note: pass start_line (and end_line) to read only the part you need."
     ),
     "grep": (
         "Search file contents for a pattern under a directory (like grep -rn) and get "
         "path:line:text matches; use it to find definitions and call sites before editing."
     ),
     "write_file": (
-        "Create a file or replace one whole file with content; path relative to the repo root. "
-        "To change part of an existing file use replace_in_file instead."
+        "Create a new file, or replace a small existing file whole; path relative to the repo "
+        "root. Refused for an existing file over 300 lines or 12 kB: use replace_in_file."
     ),
     "replace_in_file": (
         "Edit an existing file: replace the one exact occurrence of `old` (copied from "
@@ -150,33 +156,41 @@ def truncate(text: str, limit: int = 8000) -> tuple[str, bool]:
     return text[:half] + marker + text[total - half :], True
 
 
-def page_lines(text: str, start_line: int, limit: int) -> tuple[str | None, bool]:
-    """Whole lines from `start_line` up to `limit` chars, plus a continue hint when cut.
-    Unlike `truncate` this never drops the middle: a model rewriting a whole file must see all
-    of it. `None` when start_line is past the end. A single over-long line is cut by chars."""
-    page, cut, _ = _paginate(text, start_line, limit)
+READ_PAGE_LINES = 200  # read_file serves at most this many lines per call
+
+
+def page_lines(
+    text: str, start_line: int, limit: int, max_lines: int = READ_PAGE_LINES
+) -> tuple[str | None, bool]:
+    """Whole lines from `start_line`, at most `max_lines` of them and `limit` chars, plus a
+    continue hint when cut. Unlike `truncate` this never drops the middle. `None` when
+    start_line is past the end. A single over-long line is cut by chars."""
+    page, cut, _ = _paginate(text, start_line, limit, max_lines)
     return page, cut
 
 
-def _paginate(text: str, start_line: int, limit: int) -> tuple[str | None, bool, int]:
-    """`page_lines` plus the number of the last line shown."""
+def _paginate(
+    text: str, start_line: int, limit: int, max_lines: int = READ_PAGE_LINES, total: int = 0
+) -> tuple[str | None, bool, int]:
+    """`page_lines` plus the number of the last line shown. `total` is the file's line count
+    when `text` is a prefix of it (an end_line read), for the footer."""
     lines = text.splitlines(keepends=True)
-    total = len(lines)
-    if start_line > max(total, 1):
+    total = max(total, len(lines))
+    if start_line > max(len(lines), 1):
         return None, False, 0
     out: list[str] = []
     size = 0
     for line in lines[start_line - 1 :]:
-        if out and size + len(line) > limit:
+        if out and (size + len(line) > limit or len(out) >= max_lines):
             break
         out.append(line[:limit])
         size += len(out[-1])
     end = start_line - 1 + len(out)
-    if end >= total:
+    if end >= len(lines):  # the end of the file, or the requested end_line
         return "".join(out), False, end
     hint = (
-        f"…[lines {start_line}-{end} of {total} shown; call read_file with "
-        f"start_line={end + 1} for the rest]"
+        f"…[lines {start_line}-{end} of {total} shown (pages are at most {max_lines} lines); "
+        f"call read_file with start_line={end + 1} for more, or grep for what you need]"
     )
     body = "".join(out)
     return f"{body if body.endswith(chr(10)) else body + chr(10)}{hint}", True, end
@@ -355,6 +369,25 @@ def shrinks(old: int, new: int) -> bool:
     return old >= SHRINK_MIN_BYTES and new < old * SHRINK_RATIO
 
 
+# A whole-file rewrite of an existing file this large is refused (camp-head-1-210: 7 of 40
+# replies re-sent a 926-line test file and were cut at the 8192-token completion limit).
+LARGE_FILE_LINES = 300
+LARGE_FILE_BYTES = 12_000
+
+LARGE_MSG = (
+    "refused: {path} already exists and is {lines} lines / {old} bytes; write_file does not "
+    "rewrite an existing file over {max_lines} lines or {max_bytes} bytes (a whole-file reply that "
+    "long gets cut off). Use replace_in_file(path, old, new) to change or insert a few lines: to "
+    "add a test at the end, pass the file's last few lines as `old` and those lines plus the new "
+    "test as `new`. Or put the new tests in a new, short test file with write_file."
+)
+
+
+def too_large(old_bytes: int, old_lines: int) -> bool:
+    """Is an existing file too large to rewrite whole (see LARGE_MSG)?"""
+    return old_lines > LARGE_FILE_LINES or old_bytes > LARGE_FILE_BYTES
+
+
 class ToolDispatcher:
     """Validates and executes one tool call over a Box; emits one `kind="tool"` event per call."""
 
@@ -366,6 +399,7 @@ class ToolDispatcher:
         cwd: str = "/app",
         max_output: int = 8000,
         read_limit: int = 40_000,
+        read_page_lines: int = READ_PAGE_LINES,
         shell_timeout: int = 600,
         shell_wrap: str = "",
     ) -> None:
@@ -374,11 +408,17 @@ class ToolDispatcher:
         self._log = log
         self._shell_wrap = shell_wrap
         self._read_limit = read_limit
+        self._read_page_lines = read_page_lines
         self._phase: Phase = phase
         self._cwd = cwd
         self._max_output = max_output
         self._shell_timeout = shell_timeout
         self.calls = 0  # every dispatch, failures included: each cost a model round-trip
+
+    @property
+    def read_page_lines(self) -> int:
+        """The most lines one read_file call serves."""
+        return self._read_page_lines
 
     @property
     def cwd(self) -> str:
@@ -455,10 +495,12 @@ class ToolDispatcher:
             if not res.ok:
                 return self._read(box, name, res, t0)
             source = res.stdout
+            n = len(res.stdout.splitlines())
             if parsed.end_line is not None:
                 source = "".join(source.splitlines(keepends=True)[: parsed.end_line])
-            text, cut, end = _paginate(source, parsed.start_line, self._read_limit)
-            n = len(res.stdout.splitlines())
+            text, cut, end = _paginate(
+                source, parsed.start_line, self._read_limit, self._read_page_lines, n
+            )
             if text is None:
                 msg = f"start_line={parsed.start_line} is past the end ({n} lines)"
                 return ToolResult(name, False, msg, 1, box, _ms(t0), False)
@@ -475,10 +517,26 @@ class ToolDispatcher:
             if content and not content.endswith("\n"):  # models drop it; linters flag W292
                 content += "\n"
             data = content.encode()
-            if not parsed.allow_shrink:
-                old = box.run(f"cat {shlex.quote(parsed.path)}", cwd=cwd, keep=False)
+            old = box.run(f"cat {shlex.quote(parsed.path)}", cwd=cwd, keep=False)
+            if old.ok:
                 size = len(old.stdout.encode())
-                if old.ok and shrinks(size, len(data)):
+                n_lines = len(old.stdout.splitlines())
+                if too_large(size, n_lines):
+                    msg = LARGE_MSG.format(
+                        path=parsed.path,
+                        lines=n_lines,
+                        old=size,
+                        max_lines=LARGE_FILE_LINES,
+                        max_bytes=LARGE_FILE_BYTES,
+                    )
+                    refused = {
+                        "reason": "large",
+                        "old_bytes": size,
+                        "old_lines": n_lines,
+                        "new_bytes": len(data),
+                    }
+                    return ToolResult(name, False, msg, None, box, _ms(t0), False, refused=refused)
+                if not parsed.allow_shrink and shrinks(size, len(data)):
                     msg = SHRINK_MSG.format(path=parsed.path, old=size, new=len(data))
                     refused = {"reason": "shrink", "old_bytes": size, "new_bytes": len(data)}
                     return ToolResult(name, False, msg, None, box, _ms(t0), False, refused=refused)

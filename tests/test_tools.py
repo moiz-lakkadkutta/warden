@@ -421,12 +421,33 @@ def test_run_shell_without_wrap_is_unchanged(log: EventLog) -> None:
     assert backend.runs[-1] == ("ls", "/app")
 
 
-def test_read_file_returns_a_16k_file_whole(log: EventLog) -> None:
+def test_read_file_returns_a_200_line_file_whole(log: EventLog) -> None:
     _, box, img = _setup(log)
-    text = "".join(f"line {i} " + "x" * 60 + "\n" for i in range(240))  # ~16.5k chars
+    text = "".join(f"line {i} " + "x" * 60 + "\n" for i in range(200))  # ~13.8k chars
     img.files["/app/svc.py"] = text.encode()
     res = ToolDispatcher(log).dispatch(box, "read_file", {"path": "svc.py"})
     assert res.ok and res.truncated is False and res.output == text
+
+
+def test_read_file_pages_a_long_file_at_200_lines(log: EventLog) -> None:
+    # Fabric's test files run to ~900 lines; one read used to return all of them.
+    _, box, img = _setup(log)
+    lines = [f"line {i}\n" for i in range(1, 914)]
+    img.files["/app/t.py"] = "".join(lines).encode()
+    d = ToolDispatcher(log)
+    first = d.dispatch(box, "read_file", {"path": "t.py"})
+    assert first.truncated and first.lines == (1, 200) and first.total_lines == 913
+    assert first.output.startswith("".join(lines[:200]))
+    assert "lines 1-200 of 913 shown" in first.output and "start_line=201" in first.output
+    # an explicit range wider than a page is bounded too, and the footer counts the whole file
+    wide = d.dispatch(box, "read_file", {"path": "t.py", "start_line": 300, "end_line": 900})
+    assert wide.lines == (300, 499) and "lines 300-499 of 913 shown" in wide.output
+    # a range inside a page is served as asked, with no footer
+    tail = d.dispatch(box, "read_file", {"path": "t.py", "start_line": 800, "end_line": 813})
+    assert tail.output == "".join(lines[799:813]) and not tail.truncated
+    last = d.dispatch(box, "read_file", {"path": "t.py", "start_line": 801})
+    assert last.lines == (801, 913) and last.output == "".join(lines[800:])
+    assert ToolDispatcher(log, read_page_lines=50).read_page_lines == 50
 
 
 def test_read_file_pages_by_whole_lines_with_a_continue_hint(log: EventLog) -> None:

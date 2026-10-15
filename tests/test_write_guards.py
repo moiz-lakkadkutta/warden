@@ -18,7 +18,8 @@ from warden.sandbox.box import Box
 from warden.sandbox.fake import FakeBackend, FakeImage
 from warden.schemas import Candidate, Plan
 
-BIG = "".join(f"def f{i}():\n    return {i}\n" for i in range(800))  # ~19 kB
+# ~2.7 kB / 240 lines: above the shrink guard's 1 kB, below the large-file guard (300 lines)
+BIG = "".join(f"def f{i}():\n    return {i}\n" for i in range(120))
 FRAGMENT = "def f3():\n    return 'fixed'\n"
 
 
