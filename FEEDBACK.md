@@ -158,6 +158,25 @@ Every entry: date · tool · what happened · numbers · what would have helped.
   7 of 10 tasks used all 40 turns (pilot 2: 5). → guidance on which edit-tool shape Super is
   trained on (whole file vs str_replace vs unified diff) would let agents pick the one it uses
   reliably.
+- 2026-10-15 · structured output · Nemotron 3.5 Lightning now reasons by default, and the reasoning
+  counts against `max_tokens`. In the Fabric campaign (run `camp-head-1-210`) the planner's
+  ResearchQueries call (strict `json_schema`) used **8192 of 8192 completion tokens twice** (35 s
+  each) and returned truncated JSON; the `json_object` fallback then answered with the *schema
+  envelope* (`{"title": …, "type": "object", "properties": {<the answer>}}`), so the plan step
+  failed for $0.007. A probe on the same request: baseline 1119 completion tokens of which 1024
+  reasoning (4.4 s); `reasoning_effort="low"` 1133/1035 (no effect); `/no_think` in the system
+  prompt 822/738; **`chat_template_kwargs: {"enable_thinking": false}` 72/0, 0.5 s**, same
+  answer. Warden now sends that for every Lightning call (8fb5576) and unwraps the schema echo.
+  → document the thinking switch per model on the model card (it is the only one that works),
+  and say whether `strict` json_schema is meant to stop a reasoning model before `max_tokens`.
+- 2026-10-15 · tool calls · Nemotron 3 Super re-sends a large file whole through `write_file`
+  even with `replace_in_file` offered. On Fabric#210 (run `camp-head-1-210`, a test-only issue)
+  it re-sent the 926-line `tests/test_migrations_router.py` 9 times; 8 replies hit the server's
+  **8192-token completion limit** (26–34 s each) and the tool call arrived **without its `content`
+  argument** (no truncation signal in the tool call itself). 40 turns, 0 tests, $0.26. Warden now
+  tells the model the reply was cut and to use `replace_in_file` (54747c7). → expose
+  `finish_reason=length` on truncated tool calls (or reject them) instead of delivering a
+  partial argument object.
 - (fill in after Phase B3) Lightning as a tool router: turn count, wrong-tool rate.
 
 ## Nebius Serverless

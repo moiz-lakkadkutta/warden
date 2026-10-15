@@ -155,7 +155,7 @@ def test_campaign_waves_merge_and_stack(tmp_path: Path, settings: Settings) -> N
     csv_rows = cp.read_rows(out / cp.CSV_NAME)
     assert [r.issue for r in csv_rows] == [196, 197, 200, 205, 207]
     md = (out / cp.MD_NAME).read_text()
-    assert "| **total** | 5 | 4 | 4 | 0 | 1 | 1 | 4 | 4 | $0.50 |" in md
+    assert "| **final** (best attempt per issue) | 5 | 4 | 4 | 0 | 1 | 1 | 4 | 4 | $0.50 |" in md
     assert "[#1196](https://github.com/o/r/pull/1196)" in md
     assert cp.BEGIN in md and "## Notes" in md
     gate = settings.runs_dir / "c1" / "artifacts" / "wave-1-gate.txt"
@@ -191,6 +191,19 @@ def test_budget_skips_a_wave(tmp_path: Path, settings: Settings) -> None:
     )
     assert {r.verdict for r in rows} == {"SKIPPED"}
     assert world.fix_base == {}
+
+
+def test_best_rows_keeps_the_best_attempt_and_csv_keeps_both(tmp_path: Path) -> None:
+    def row(campaign: str, verdict: str, usd: float) -> cp.Row:
+        return cp.Row(197, "backlog", verdict, "n", 1, "—", "", usd, 60, at="x^", campaign=campaign)
+
+    path = tmp_path / "c.csv"
+    cp.write_rows(path, [row("a", "FAIL", 0.2)])
+    rows = cp.write_rows(path, [row("b", "PASS", 0.3)])
+    assert len(rows) == 2
+    assert [r.campaign for r in cp.best_rows(rows)] == ["b"]
+    md = cp.render_markdown(rows, [])
+    assert "| **final** (best attempt per issue) | 1 | 0 | 1 | 0 | 0 | 0 | 0 | 0 | $0.50 |" in md
 
 
 def test_pending_reason() -> None:
