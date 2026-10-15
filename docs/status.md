@@ -42,6 +42,39 @@ email validator rejects reserved domains (`.local`). Not done: filing + `warden 
 issue (nothing truthful to file); the race-axis fallback (the plan allows it "only if IDOR
 provably finds nothing" — which now holds) is available but was not built this pass.
 
+### C5 replay: hunt → file → fix → verify at `d9c37cb^` (2026-10-15) — PR not reached
+
+`warden hunt --at <rev>` checks the rev out at `/src` in the fork, creates a fresh scratch DB
+(`warden_replay`, as the image's `postgres` superuser, local trust), runs `alembic upgrade head` to
+that rev's schema, boots, and probes (signup auto-seeds the catalogue, so no demo seed; the venv is
+reused because deps are unchanged `d9c37cb^`..`8cfc493`). ~10.7 s per run, $0.
+
+| Step | Result |
+|---|---|
+| Hunt `20261015-163638-ce14` (`--at d9c37cb^`, 2×) | **6 cross-firm writes confirmed 2×** — `POST /parties` [regression SEC-1], `/items`, `/cost-centres`, `/designs`, `/locations`, `/operation-masters` all 201 with another tenant's `firm_id` |
+| File | **[Fabric-Inventory#225](https://github.com/moiz-lakkadkutta/Fabric-Inventory/issues/225)**, `warden-hunt`, one grouped issue, "historical replay — already fixed on main by d9c37cb/#172" at the top; closed with a comment after the fix runs |
+| Fix + verify, 3 attempts | **FAIL every time → no branch pushed, no PR** (by design: FAIL opens nothing) |
+
+| Run | Turns | Verdict | Why | $ |
+|---|---|---|---|---|
+| `…-163738-774e` | 25 (`.env` cap) | FAIL | implementer out of turns; broken test (KeyError); mypy red | 0.16 |
+| `…-165152-7771` | — | no plan | Ultra hit `max_tokens=16384` 3× before emitting `Plan` JSON | 0.27 |
+| `…-165529-50c3` | 60 | FAIL | repro test right (POST /items → 201 on base) but fix never written: 25 reads, 13 greps, 2 edits (both to the test) | 0.36 |
+| `…-171229-2792` | 60 × best-of-2 | FAIL | both candidates guarded in `app/dependencies.py` / `routers/items.py`; POST /items still 201 | 0.70 |
+
+**Total $1.49** (hunt $0). Theater did its job: every candidate's new test was red on the unfixed
+base for the right reason and *still red with the candidate's change*, so an ineffective security
+fix was rejected rather than shipped.
+
+**Warden vs the human fix:** `d9c37cb` adds one `assert_firm_in_org(session, org_id, firm_id)`
+helper (`service/common_guards.py`) and calls it at the top of 17 mutating methods in 13 services,
++1421/−3 with tests in each — at the **service** layer, because (its commit message) "Owner JWT
+firm_id=None bypasses router checks". Warden's candidates went for the router/dependency layer, which
+the signup Owner token passes straight through; the planner's `files_to_touch` named routers, not
+services. Lessons: (1) a 6-endpoint grouped issue is too wide for one Super candidate; filing one
+issue per service (or a plan that names the service layer) is the likely fix; (2) the worktree `.env`
+still sets `WARDEN_MAX_TOOL_TURNS=25` (doctor warns).
+
 ## Phase A spike: done (A3–A7 live on Nebius)
 
 | Step | Commit | Result |
