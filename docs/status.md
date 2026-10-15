@@ -46,6 +46,21 @@ Gate on main: ruff ✓ format ✓ mypy --strict ✓ **241 passed**. Token Factor
 - **Settings in use:** `WARDEN_WORKDIR=/src`, `WARDEN_SHELL_WRAP="with-services sh -c"`,
   `WARDEN_TARGET_REPO=moiz-lakkadkutta/Fabric-Inventory`.
 
+## E3 console on Nebius Serverless (2026-10-15)
+
+- **URL:** https://port8080-cs9x5ndsvxz54x7.tunnel.applications.eu-west2.nebius.cloud/
+  (`/healthz` reports the image build sha).
+- **Endpoint** `warden-console` = `aiendpoint-e04v1xybmyd76zq065`, project
+  `project-e04w3bxjbc0029g2wvxk5h` (the CLI profile's project, shared with regwatch), eu-west2,
+  `cpu-d3` `2vcpu-8gb`, 32 GiB disk, `--auth none`, no public IP (managed https tunnel URL).
+  About $0.07/h while running (~$1.7/day). Stop billing: `ops/deploy-console.sh --down`.
+- **Registry** `warden` = `registry-e04kcgrdbeq7w1kd5m` →
+  `cr.eu-west2.nebius.cloud/e04kcgrdbeq7w1kd5m/warden-console:{<sha>,live}`.
+- **Redeploy** after `warden console … --out site`: commit, then `ops/deploy-console.sh` (pushes
+  `:<sha>` + `:live`, restarts the endpoint so it re-pulls `:live`; the URL stays the same).
+- Docker Desktop on this Mac belongs to another macOS user, so the script assembles the image with
+  `crane` (no daemon) when `docker info` fails: same layout as `console/Dockerfile`.
+
 ## Start here next session
 
 ### 1. B6-live: ✓ Phase B exit (2026-10-10). PASS, draft PR opened unattended
