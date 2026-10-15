@@ -222,7 +222,7 @@ def assistant_message(content: str | None, tool_calls: list[dict[str, Any]]) -> 
     return msg
 
 
-KEEP_RECENT = 6  # newest tool results (and write_file calls) sent whole
+KEEP_RECENT = 6  # newest large tool results (and write_file calls) sent whole
 ELIDE_MIN = 1500  # shorter outputs are cheap to keep
 
 
@@ -230,8 +230,10 @@ def compact_history(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """The history to send: older tool outputs become a one-line stub and older write_file
     calls lose their content (the file is in the box, a read_file away). Without this every
     earlier page is re-sent on every turn: on the SWE-rebench pilot prompts reached 173k tokens
-    (pennylane-5831, 3.0M prompt tokens in 34 calls). Pairing and order are untouched."""
-    tool_idx = [i for i, m in enumerate(messages) if m["role"] == "tool"]
+    (pennylane-5831, 3.0M prompt tokens in 34 calls). Pairing and order are untouched. Only large
+    outputs count towards the KEEP_RECENT window: short ones (a cached re-read note, an exit code)
+    used to push the page they referred to out of it (camp-replay-212-c-196)."""
+    tool_idx = _large_tool_idx(messages)
     call_idx = [
         i for i, m in enumerate(messages) if m["role"] == "assistant" and m.get("tool_calls")
     ]
@@ -305,6 +307,16 @@ REREAD_STOP_MSG = (
     "test at the end of a long file, pass its last few lines as `old` and those lines plus the "
     "new test as `new`), write_file for a NEW short test file, run_shell to run the tests, or "
     "finish (done=false with the unmet items if you are stuck)."
+)
+# The note alone did not break the loop live (camp-replay-212-c: 16 cached answers for a 50-line
+# file on #196, 13 of them escalated, and no edit). After an escalated answer the next model calls
+# are sent without the read-only tools, until it edits a file, runs a command or EDIT_MODE_TURNS
+# turns pass: it can write, replace, run or finish, nothing else.
+READ_ONLY_TOOLS = frozenset({"list_files", "read_file", "grep"})
+EDIT_MODE_TURNS = 3
+EDIT_MODE_MSG = (
+    "read_file, grep and list_files are switched off for your next turns: you have the text. "
+    "Make the edit (replace_in_file / write_file), run the tests (run_shell), or finish."
 )
 RESENT_PREFIX = "[unchanged since turn {turn}; re-sent because that output was elided]\n"
 IDLE_NUDGE = (
@@ -394,12 +406,20 @@ class ReadMemory:
         return None
 
 
+def _large_tool_idx(messages: list[dict[str, Any]]) -> list[int]:
+    """Indexes of the tool results compact_history may elide (longer than ELIDE_MIN)."""
+    return [
+        i
+        for i, m in enumerate(messages)
+        if m["role"] == "tool" and len(m["content"] or "") > ELIDE_MIN
+    ]
+
+
 def _visible(messages: list[dict[str, Any]], idx: int) -> bool:
     """Will message `idx` still be sent whole by `compact_history` after one more tool result?"""
     if len(messages[idx]["content"] or "") <= ELIDE_MIN:
         return True
-    tool_idx = [i for i, m in enumerate(messages) if m["role"] == "tool"]
-    return idx in tool_idx[-(KEEP_RECENT - 1) :]
+    return idx in _large_tool_idx(messages)[-(KEEP_RECENT - 1) :]
 
 
 def _read_range(args: Any, page: int = 0) -> tuple[str, int, int | None] | None:
@@ -577,6 +597,9 @@ def run_implementer(
     auto_checked: int | None = None  # the green turn the auto-finish check last ran for
     auto: str | None = None  # "green" | "cap": Warden finished for the model
     page = dispatch.read_page_lines
+    edit_mode_until = 0  # while turns < this, the read-only tools are withheld
+    edit_mode_pending = False  # tell the model, after the current batch
+    edit_tools = [t for t in tools if t["function"]["name"] not in READ_ONLY_TOOLS]
 
     def ready(at: Box) -> tuple[Box, str]:
         """Warden's own check before finishing for the model, outside the turn budget: the new
@@ -616,7 +639,8 @@ def run_implementer(
         **({} if unfixed is None else {"unfixed": unfixed.uuid, "prior_tests": tests_added[:]}),
     )
     while report is None and turns < max_tool_turns:
-        res = llm.chat(Role.IMPLEMENTER, PHASE, compact_history(messages), tools=tools)
+        offered = edit_tools if turns < edit_mode_until else tools
+        res = llm.chat(Role.IMPLEMENTER, PHASE, compact_history(messages), tools=offered)
         cost += _charge(res, hooks)
         calls = res.tool_calls
         if not calls and res.content:
@@ -627,7 +651,7 @@ def run_implementer(
                     {"role": "system", "content": ROUTER_SYSTEM},
                     {"role": "user", "content": res.content},
                 ],
-                tools=tools,
+                tools=offered,
             )
             cost += _charge(routed, hooks)
             calls = routed.tool_calls
@@ -653,6 +677,11 @@ def run_implementer(
                 continue
             if turns >= max_tool_turns:
                 messages.append(_tool_message(cid, BUDGET_MSG))
+                continue
+            if turns < edit_mode_until and name in READ_ONLY_TOOLS:  # called though not offered
+                turns += 1
+                messages.append(_tool_message(cid, f"refused: {EDIT_MODE_MSG}"))
+                note("edit_mode_refused", name=name, tool_turns=turns)
                 continue
             if name == UNFIXED_TOOL_NAME and unfixed is not None:
                 text, code, targets = run_unfixed(
@@ -718,6 +747,9 @@ def run_implementer(
                         escalated=escalated,
                     )
                     hooks.step(f"read_file {rpath} → unchanged since turn {since}")
+                    if escalated and turns >= edit_mode_until:
+                        edit_mode_until = turns + EDIT_MODE_TURNS
+                        edit_mode_pending = True
                     continue
                 resent = memory.covering(rpath, rstart, rend, lambda _: True)
             result = dispatch.dispatch(box, name, raw)
@@ -739,6 +771,8 @@ def run_implementer(
                 hooks.step(f"{name} {edit_path} → refused: {why}")
             mutating = name in (*EDIT_TOOLS, "run_shell") and result.exit_code is not None
             idle = 0 if mutating else idle + 1
+            if mutating:
+                edit_mode_until = 0  # it acted: the read tools come back
             if name == "run_shell" and result.exit_code is not None:
                 memory.forget(None)  # a command may have rewritten any file
                 command = args.get("command") if isinstance(args, dict) else None
@@ -766,7 +800,12 @@ def run_implementer(
                         if new and node not in tests_added:
                             tests_added.append(node)
         # after the whole batch: a user message may not split tool_calls from their results
-        if (
+        if edit_mode_pending and report is None:
+            edit_mode_pending = False
+            messages.append({"role": "user", "content": EDIT_MODE_MSG})
+            note("edit_mode", tool_turns=turns, until_turn=edit_mode_until)
+            hooks.step(f"edit mode: read tools off until turn {edit_mode_until}")
+        elif (
             report is None
             and turns < max_tool_turns
             and idle_nudge_after

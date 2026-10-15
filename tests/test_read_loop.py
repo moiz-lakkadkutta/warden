@@ -170,9 +170,10 @@ def test_an_elided_read_is_resent_with_a_note(log: EventLog) -> None:
     # compact_history stubs older large outputs; the model then genuinely lacks the text, so a
     # re-read is served again (marked) rather than refused.
     env = Env(log)
-    others = [read("src/other.py", start_line=1)] + [
-        turn(tool_call("list_files", path=".")) for _ in range(KEEP_RECENT - 1)
-    ]
+    image = env.backend.images[env.base.uuid]
+    for i in range(KEEP_RECENT):  # large outputs: only those count towards the window
+        image.files[f"/app/src/big{i}.py"] = "".join(LINES).encode()
+    others = [read(f"src/big{i}.py") for i in range(KEEP_RECENT)]
     llm, _ = env.run([read(), *others, read(), finish_turn()], idle_nudge_after=0)
     assert env.dispatcher.calls == KEEP_RECENT + 2
     last = _tool_msgs(llm)[-1]
@@ -274,9 +275,10 @@ def test_replay_run_2_reread_loop(log: EventLog) -> None:
     llm, cand = env.run([*loop, *fix], max_tool_turns=40)
     assert cand.done is True and cand.tool_turns == 11 and cand.tests_added == [T]
     assert env.dispatcher.calls == 3 + 3  # three first reads, then the three fix calls
-    assert len(_notes(log, "reread")) == 5
-    nudges = [m for m in llm.calls[8].messages if m["role"] == "user"][1:]
-    assert len(nudges) == 1 and "stop re-reading" in nudges[0]["content"]
+    # three cached answers (the third escalated), then edit mode refuses the last two reads
+    assert len(_notes(log, "reread")) == 3 and len(_notes(log, "edit_mode_refused")) == 2
+    users = [m["content"] for m in llm.calls[8].messages if m["role"] == "user"][1:]
+    assert any("switched off" in u for u in users)
 
 
 def test_replay_run_1_end_line_strings_are_not_rejected(log: EventLog) -> None:
@@ -354,3 +356,15 @@ def test_env_example_documents_the_guards() -> None:
     text = (Path(__file__).resolve().parents[1] / ".env.example").read_text(encoding="utf-8")
     assert "WARDEN_MAX_TOOL_TURNS=60" in text
     assert "WARDEN_IDLE_NUDGE_AFTER=8" in text and "WARDEN_READ_CACHE=1" in text
+
+
+def test_short_outputs_do_not_push_a_page_out_of_the_window(log: EventLog) -> None:
+    # camp-replay-212-c-196: five short "unchanged" notes pushed the page they referred to out of
+    # the KEEP_RECENT window, so it was elided while the notes said "you already have it"
+    env = Env(log)
+    shorts = [turn(tool_call("list_files", path="src")) for _ in range(KEEP_RECENT + 2)]
+    llm, _ = env.run([read(), *shorts, read(), finish_turn()], idle_nudge_after=0)
+    assert env.dispatcher.calls == KEEP_RECENT + 3
+    assert _tool_msgs(llm)[-1].startswith("unchanged since turn 1")
+    sent = llm.calls[-1].messages
+    assert any(m["role"] == "tool" and m["content"].startswith("line 001") for m in sent)

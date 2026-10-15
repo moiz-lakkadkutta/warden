@@ -12,7 +12,7 @@ from typing import Any
 import pytest
 
 from tests.fakes import ScriptedLLM, TddBackend, finish_turn, tool_call, turn
-from warden.fix.implementer import REREAD_ESCALATE_AFTER, run_implementer
+from warden.fix.implementer import EDIT_MODE_TURNS, REREAD_ESCALATE_AFTER, run_implementer
 from warden.fix.tools import LARGE_FILE_BYTES, LARGE_FILE_LINES, ToolDispatcher, too_large
 from warden.llm.client import ChatResult
 from warden.runlog.events import EventLog
@@ -90,7 +90,11 @@ def test_the_test_file_is_large() -> None:
 # ------------------------------------------------------------------ re-read escalation
 
 
-def test_repeated_rereads_escalate_after_two(log: EventLog) -> None:
+def _names(tools: list[dict[str, Any]] | None) -> set[str]:
+    return {t["function"]["name"] for t in tools or []}
+
+
+def test_repeated_rereads_escalate_after_two_then_read_tools_go_away(log: EventLog) -> None:
     env = Env(log)
     tail = {"start_line": 800, "end_line": 813}
     script = [read(**tail), *[read(**tail) for _ in range(4)], finish_turn(done=False, unmet=["x"])]
@@ -99,16 +103,51 @@ def test_repeated_rereads_escalate_after_two(log: EventLog) -> None:
     msgs = _tool_msgs(llm)
     assert msgs[1].startswith("unchanged since turn 1") and msgs[2].startswith("unchanged since")
     assert msgs[3].startswith(f"STOP re-reading {T}: this is request 4")
-    assert msgs[4].startswith(f"STOP re-reading {T}: this is request 5")
     assert "replace_in_file" in msgs[3] and "finish" in msgs[3]
+    # edit mode: the next calls are offered no read tools, and one sent anyway is refused
+    assert {"read_file", "grep", "list_files"} <= _names(llm.calls[3].tools)
+    offered = _names(llm.calls[4].tools)
+    assert not offered & {"read_file", "grep", "list_files"}
+    assert {"replace_in_file", "write_file", "run_shell", "finish"} <= offered
+    assert msgs[4].startswith("refused: read_file, grep and list_files are switched off")
     rereads = _notes(log, "reread")
-    assert [(n["repeat"], n["escalated"]) for n in rereads] == [
-        (1, False),
-        (2, False),
-        (3, True),
-        (4, True),
-    ]
+    assert [(n["repeat"], n["escalated"]) for n in rereads] == [(1, False), (2, False), (3, True)]
+    (mode,) = _notes(log, "edit_mode")
+    assert mode["tool_turns"] == 4 and mode["until_turn"] == 4 + EDIT_MODE_TURNS
+    assert len(_notes(log, "edit_mode_refused")) == 1
     assert REREAD_ESCALATE_AFTER == 2
+
+
+def test_edit_mode_ends_after_an_edit(log: EventLog) -> None:
+    env = Env(log)
+    tail = {"start_line": 811, "end_line": 813}
+    old = "def test_case_270():\n    assert 270 == 270\n"
+    script = [
+        *[read(**tail) for _ in range(4)],  # the 4th is escalated: edit mode
+        turn(
+            tool_call("replace_in_file", path=T, old=old, new=old + "\n\ndef test_x():\n    pass\n")
+        ),
+        read(**tail),  # read tools are back
+        finish_turn(done=False, unmet=["x"]),
+    ]
+    llm, _ = env.run(script)
+    assert "read_file" not in _names(llm.calls[4].tools)
+    assert "read_file" in _names(llm.calls[5].tools)
+    assert not _tool_msgs(llm)[5].startswith(("refused", "unchanged", "STOP"))
+
+
+def test_edit_mode_lapses_after_its_turns(log: EventLog) -> None:
+    env = Env(log)
+    tail = {"start_line": 811, "end_line": 813}
+    script = [
+        *[read(**tail) for _ in range(4)],
+        *[turn(tool_call("list_files", path=".")) for _ in range(EDIT_MODE_TURNS)],
+        read(**tail),
+        finish_turn(done=False, unmet=["x"]),
+    ]
+    llm, _ = env.run(script)
+    assert len(_notes(log, "edit_mode_refused")) == EDIT_MODE_TURNS
+    assert "read_file" in _names(llm.calls[4 + EDIT_MODE_TURNS].tools)
 
 
 def test_alternating_tail_ranges_count_as_repeats_of_one_file(log: EventLog) -> None:
