@@ -11,6 +11,11 @@ uvx warden run --demo        # the whole loop on a fake sandbox, no credentials,
 uvx warden console           # the run's timeline + evidence table
 ```
 
+**Live console** (Nebius Serverless AI endpoint):
+<https://port8080-cs9x5ndsvxz54x7.tunnel.applications.eu-west2.nebius.cloud/> · an example run
+with its branch tree:
+<https://port8080-cs9x5ndsvxz54x7.tunnel.applications.eu-west2.nebius.cloud/20261010-111217-7c89/>
+
 ## What it has done (real runs, not demos)
 
 - **[Fabric-Inventory#221](https://github.com/moiz-lakkadkutta/Fabric-Inventory/pull/221)**: a
@@ -28,6 +33,7 @@ uvx warden console           # the run's timeline + evidence table
 | Token Factory (OpenAI-compatible) | every model call; JSON-schema structured output; function calling |
 | Token Factory **Sandboxes** | every issue is a fork of a base checkpoint (~1 s). The **theater check** forks the *unfixed* base and runs only the new tests (they must fail). The **regression check** runs the base's own tests on both forks. The gate runs on disposable forks, so the candidate is never modified |
 | Preloaded SWE-rebench images | `warden eval` plans, fixes and verifies on the task image, then grades with the hidden tests the agent never saw |
+| **Serverless AI endpoint** + Container Registry | the run console ([live](https://port8080-cs9x5ndsvxz54x7.tunnel.applications.eu-west2.nebius.cloud/)): `console/` is a read-only FastAPI app over the rendered runs (`/api/runs`, `/api/runs/<id>/events`), shipped as a non-root image to Nebius Container Registry and run on a `cpu-d3` endpoint by [`ops/deploy-console.sh`](ops/deploy-console.sh) |
 
 ## NVIDIA models
 
@@ -140,7 +146,8 @@ Every model call and sandbox operation is appended to `runs/<id>/events.jsonl` w
 and wall-clock; `warden console` renders it to one self-contained HTML page plus
 `runs/<id>/timeline.gif` (Pillow, `uv sync --extra gif`), and `warden console <id>... --out site`
 writes a static site (index + one page per run) that `.github/workflows/console-pages.yml`
-publishes to GitHub Pages. A per-issue cost cap stops the run cleanly, and
+publishes to GitHub Pages; the same site runs on a Nebius Serverless AI endpoint
+(`console/`, deployed by `ops/deploy-console.sh`). A per-issue cost cap stops the run cleanly, and
 `warden resume <run_id>` continues from the last completed phase.
 
 ## Quickstart (live)
