@@ -1,5 +1,47 @@
 # Warden — status (2026-10-12)
 
+## C5/C6: Hunter — IDOR / cross-tenant axis (2026-10-15)
+
+Built the Hunter end to end for one axis (IDOR / cross-tenant access) and ran it live against
+`warden/fabric-base:latest` on Nebius Sandboxes. `warden hunt --axis idor [--no-file]` boots
+Fabric's uvicorn against the seeded `fabric_demo` DB in a **fork** of the base
+(`with-services sh -c`), signs up two throwaway tenants A and B, enumerates every id-taking GET and
+every `firm_id`-taking POST from `/openapi.json`, and probes two cross-tenant families inside the
+sandbox (one stdlib Python harness per run, so the booted server and all requests share a process):
+
+- **cross-org read** — org B creates a row, org A tries to read it by id (expect 404/422);
+- **cross-firm write** — org A POSTs each `firm_id`-taking create carrying org B's `firm_id`
+  (expect 422 "Firm … not found in this organization"; a 201 is the SEC-1 / AUTHZ-2 bug).
+
+Findings must reproduce in every run before filing (`--repro-times`, default 2); the filer groups
+by `root_cause_key`, ensures a `warden-hunt` label and `gh issue create`s the strict format
+(severity · curl repro · expected/actual + request_id · impact). The known-issues baseline
+(Fabric `docs/reviews/flows/12-bug-register.md` + the pentest IDOR slice, 35 ids) labels re-finds
+as regressions. Fully offline-tested (`tests/test_hunter.py`, 25 tests, fake sandbox); gate green.
+
+**Live result — run `20261015-162240-1f6d` (2× reproduction, ~8 s/run, $0 Token Factory: the probe
+is deterministic, no model calls):**
+- 34 id-taking GET endpoints enumerated; 26 `firm_id`-taking POSTs swept.
+- cross-org by-id reads on `/parties/{id}` and `/items/{id}` → **422, isolation holds**.
+- **8** `firm_id` endpoints reached and were rejected by the firm-in-org guard with 422
+  (`/parties`, `/items`, `/ledgers`, `/bank-accounts`, `/cost-centres`, `/designs`, `/locations`,
+  `/operation-masters`); the other 18 returned a generic 422 request-validation (a synthetic body
+  can't supply the real FK ids they need, so the guard isn't reached — inconclusive, not a hole).
+- **0 confirmed, 0 plausible findings.** The previously-registered cross-firm firm-spoof
+  (SEC-1 / AUTHZ-2) was fixed in Fabric `d9c37cb` (Wave B firm-isolation); the Hunter independently
+  confirms the `assert_firm_in_org` guard now holds across 8 endpoints and org-level reads are
+  isolated.
+
+**So the C5 freeze-checklist item "Hunter files a confirmed P0 on the seeded tenant" is _not_ met
+on current Fabric HEAD — there is no live cross-tenant P0 to file.** This is a truthful negative,
+not a gap in the Hunter: the known IDOR-class bugs are patched and the probe reaches and verifies
+the guards. The axis correctly files nothing rather than inflate a non-finding. Three app-level
+boot/reach quirks were learned and encoded in the harness: dev boot needs `JWT_SECRET`; every
+mutating POST needs an `Idempotency-Key` (else 400) before the firm guard is reachable; the signup
+email validator rejects reserved domains (`.local`). Not done: filing + `warden run` on a filed
+issue (nothing truthful to file); the race-axis fallback (the plan allows it "only if IDOR
+provably finds nothing" — which now holds) is available but was not built this pass.
+
 ## Phase A spike: done (A3–A7 live on Nebius)
 
 | Step | Commit | Result |

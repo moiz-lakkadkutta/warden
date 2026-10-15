@@ -24,6 +24,12 @@ with its branch tree:
   Draft PR labelled `PENDING-HUMAN`. The target repo's own CI: **7/7 jobs green.**
 - The theater check on that run: the new repro test **fails on the unfixed base**
   (`10498.95 == 0`) and passes on the candidate ([screenshot](docs/spike-A7.png)).
+- **Hunter (IDOR / cross-tenant axis), live on the seeded demo tenant:** `warden hunt --axis idor`
+  boots Fabric in a sandbox fork, signs up two tenants, enumerates id-taking endpoints from
+  `/openapi.json` and probes cross-org reads and cross-firm writes — reproducing twice before it
+  files. On current Fabric it **finds no cross-tenant hole and files nothing**: org-level reads are
+  isolated (422) and the firm-in-org guard holds across 8 `firm_id` endpoints, independently
+  confirming the Wave-B isolation fix. Deterministic — **$0 of model spend** per hunt.
 - SWE-rebench on Nebius's preloaded task images: see [Results](#results).
 
 ## Runs on Nebius
