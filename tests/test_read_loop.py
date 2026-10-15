@@ -115,14 +115,17 @@ def test_rereading_an_unchanged_range_is_answered_without_the_content(log: Event
     ]
 
 
-def test_whole_file_reread_after_a_page_is_cached_only_when_fully_seen(log: EventLog) -> None:
+def test_whole_file_reread_is_a_repeat_of_its_first_page(log: EventLog) -> None:
+    # 300 lines, pages of 200: read() serves 1-200, so asking again is that page again; a read
+    # from line 7 reaches 201-206, which were never shown, and is served.
     env = Env(log)
     script = [read(), read(), read(start_line=7), finish_turn()]
     llm, _ = env.run(script, idle_nudge_after=0)
-    assert env.dispatcher.calls == 1
+    assert env.dispatcher.calls == 2
     msgs = _tool_msgs(llm)
-    assert msgs[1].startswith("unchanged since turn 1: src/recur.py lines 1-300")
-    assert msgs[2].startswith("unchanged since turn 1: src/recur.py lines 7-300")
+    assert "lines 1-200 of 300 shown" in msgs[0]
+    assert msgs[1].startswith("unchanged since turn 1: src/recur.py lines 1-200")
+    assert msgs[2].startswith("line 007\n") and "lines 7-206 of 300 shown" in msgs[2]
 
 
 def test_a_write_to_the_file_invalidates_its_reads(log: EventLog) -> None:
@@ -167,14 +170,15 @@ def test_an_elided_read_is_resent_with_a_note(log: EventLog) -> None:
     # compact_history stubs older large outputs; the model then genuinely lacks the text, so a
     # re-read is served again (marked) rather than refused.
     env = Env(log)
-    others = [read("src/other.py", start_line=1)] + [
-        turn(tool_call("list_files", path=".")) for _ in range(KEEP_RECENT - 1)
-    ]
+    image = env.backend.images[env.base.uuid]
+    for i in range(KEEP_RECENT):  # large outputs: only those count towards the window
+        image.files[f"/app/src/big{i}.py"] = "".join(LINES).encode()
+    others = [read(f"src/big{i}.py") for i in range(KEEP_RECENT)]
     llm, _ = env.run([read(), *others, read(), finish_turn()], idle_nudge_after=0)
     assert env.dispatcher.calls == KEEP_RECENT + 2
     last = _tool_msgs(llm)[-1]
     assert last.startswith("[unchanged since turn 1; re-sent because that output was elided]\n")
-    assert last.endswith("line 300\n")
+    assert "line 200\n" in last and "lines 1-200 of 300 shown" in last
     assert len("".join(LINES)) > ELIDE_MIN
 
 
@@ -271,9 +275,10 @@ def test_replay_run_2_reread_loop(log: EventLog) -> None:
     llm, cand = env.run([*loop, *fix], max_tool_turns=40)
     assert cand.done is True and cand.tool_turns == 11 and cand.tests_added == [T]
     assert env.dispatcher.calls == 3 + 3  # three first reads, then the three fix calls
-    assert len(_notes(log, "reread")) == 5
-    nudges = [m for m in llm.calls[8].messages if m["role"] == "user"][1:]
-    assert len(nudges) == 1 and "stop re-reading" in nudges[0]["content"]
+    # three cached answers (the third escalated), then edit mode refuses the last two reads
+    assert len(_notes(log, "reread")) == 3 and len(_notes(log, "edit_mode_refused")) == 2
+    users = [m["content"] for m in llm.calls[8].messages if m["role"] == "user"][1:]
+    assert any("switched off" in u for u in users)
 
 
 def test_replay_run_1_end_line_strings_are_not_rejected(log: EventLog) -> None:
@@ -351,3 +356,15 @@ def test_env_example_documents_the_guards() -> None:
     text = (Path(__file__).resolve().parents[1] / ".env.example").read_text(encoding="utf-8")
     assert "WARDEN_MAX_TOOL_TURNS=60" in text
     assert "WARDEN_IDLE_NUDGE_AFTER=8" in text and "WARDEN_READ_CACHE=1" in text
+
+
+def test_short_outputs_do_not_push_a_page_out_of_the_window(log: EventLog) -> None:
+    # camp-replay-212-c-196: five short "unchanged" notes pushed the page they referred to out of
+    # the KEEP_RECENT window, so it was elided while the notes said "you already have it"
+    env = Env(log)
+    shorts = [turn(tool_call("list_files", path="src")) for _ in range(KEEP_RECENT + 2)]
+    llm, _ = env.run([read(), *shorts, read(), finish_turn()], idle_nudge_after=0)
+    assert env.dispatcher.calls == KEEP_RECENT + 3
+    assert _tool_msgs(llm)[-1].startswith("unchanged since turn 1")
+    sent = llm.calls[-1].messages
+    assert any(m["role"] == "tool" and m["content"].startswith("line 001") for m in sent)

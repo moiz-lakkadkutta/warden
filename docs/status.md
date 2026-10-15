@@ -527,6 +527,75 @@ and whole-file rewrites past the completion limit. Candidate fixes: cap `read_fi
 files over about 400 lines, and refuse a `write_file` over N kB on an existing file in favour of
 `replace_in_file`. Then re-run `camp-replay-212`, which needs Moiz's OK.
 
+### 1l. B3 implementer: large files, edit mode, auto-finish; Fabric re-run (2026-10-15): 0/6 PASS, loop broken, $2.55
+
+Branch `fix/b3-implementer-finish` (worktree), commits `9524ab7` `89854a6` `723356f` `ea9c6bc`.
+
+**Evidence first (events of the 15 campaign attempts and hunter replay `20261015-175548-8d5d`):**
+- Re-reads: the "unchanged" note fired 30 times (#200 A), 52+19 (#197 B) and 44+42 (#200 B). On b-200
+  candidate 1 that was 44 of 60 turns, mostly asking for the same 14-line tail (800–813) of the
+  813-line `test_grn_service.py` while the content was still visible.
+- Truncation: camp-head-1-210 hit 8192/8192 completion tokens on 7 of 40 replies, each a `write_file`
+  that arrived without `content`.
+- At the cap: 8d5d's chosen candidate (service-layer fix, valid repro) ran its new tests green at
+  turns 58–59 of 60. It went to verify, but `decide()` FAILs `done=False` outright ("implementer did
+  not finish"), so a viable candidate was rejected on that line alone.
+
+**Changes (offline-tested, 30 new tests net; gate green):**
+1. `read_file` serves at most 200 lines (`READ_PAGE_LINES`) with a "lines X–Y of N; start_line=…"
+   footer. The read cache treats a whole-file re-read as a repeat of page one. From the 3rd cached
+   answer for a file (since it last changed), the reply says STOP and names the only useful calls.
+   The `reread` note now carries `repeat` and `escalated`.
+2. `write_file` refuses to rewrite an existing file over 300 lines or 12 kB (`refused_large` note,
+   `refused.reason="large"`), with an append-with-`replace_in_file` hint. New files are not
+   affected, and the shrink guard is unchanged.
+3. **Auto-finish.** A candidate qualifies when it has new tests, a source edit and a green test run.
+   (In a theater retry the base already holds the fix.) After 4 quiet turns, or at the turn cap,
+   Warden re-runs the new tests and the lint command outside the budget; autofix is kept only if it
+   makes lint clean. If both pass, `done=True` and an `auto_finish` note (`reason=green|cap`) is
+   logged. If not, `auto_finish_declined` is logged with the reason, which is also fed back to the
+   model mid-run. The verifier is untouched and still judges the candidate.
+4. **Edit mode** (added after `-c`, below). After an escalated re-read, or from the 2nd idle nudge,
+   the next model calls are offered no `read_file`/`grep`/`list_files`. This lasts until the model
+   edits a file, runs a command, or 3 turns pass. A read sent anyway is refused (`edit_mode`,
+   `edit_mode_refused` notes). `compact_history` now counts only large outputs toward its
+   KEEP_RECENT window: the short notes had been pushing the page they referred to out of it.
+5. **Completion budget.** A live probe on Super, echoing a 900-function file: with no max_tokens,
+   8192 tokens, finish=length; with max_tokens=32768, 24980 tokens, finish=stop. The new
+   `WARDEN_IMPLEMENTER_MAX_TOKENS` defaults to 16384 (0 = server default, at most 32768).
+   `.env.example` and `config.py` are updated, and doctor shows the value and warns at ≤ 8192.
+   Thinking is on by default for Super, but its reasoning on a tool turn is short (62 chars,
+   41 completion tokens).
+
+**Live: `camp-replay-212-c` / `-d`, the six #212 issues at `43f3851^`, config A (40 turns ×
+1 candidate, $0.80/issue cap).** Table in `evals/fabric/campaign.md`.
+
+| | before (`camp-replay-212`) | `-c` (1–3, 5) | `-d` (+ edit mode) |
+|---|---|---|---|
+| PASS | 1 | 0 | 0 |
+| valid repro | 1 | 0 | 2 |
+| finish / auto-finish | 1 / — | 0 / 0 | 1 / 0 (5 declined, all correct) |
+| runs editing source | 1 | 0 | 5 |
+| replace_in_file calls | 3 | 0 | 26 |
+| cached re-reads | 71 | 87 | 32 |
+| replies cut at 8192 | 2 | 0 | 0 |
+| $ | 1.11 | 1.14 | 1.35 |
+
+- **`-c`:** the STOP note did not change Super's behaviour. On #196 it got 16 cached answers for a
+  50-line file, 13 escalated, and the model never edited. Zero source edits across all six runs.
+- **`-d`:** edit mode breaks the loop, but the fix rate did not move.
+  - #196: finished on its own with a correct repro and 1/1 behaviour, but 2 suite failures and mypy
+    red.
+  - #206: valid repro, but a non-autofixable ruff error and 2 suite failures.
+  - The other four wrote repros that fail for the wrong reason.
+  - The remaining bottleneck is Super's code and test quality on Fabric, not the tool loop.
+- `#196` PASSed in the first campaign and FAILed in both re-runs: one sample per issue is noise.
+- **Spend: $2.55** ($1.14 + $1.35 + ~$0.06 probes). No PR: every row FAILed.
+
+**Next:** feed the verifier's suite failures back to the implementer (a "regression retry", like the
+theater retry) for candidates with a valid repro (#196, #206 here). Try Super at a higher temperature,
+since 0.1 may feed the repetition. Run best-of-N only with edit mode on.
+
 ### 1a. Earlier notes: blocked by Token Factory billing (resolved)
 
 `warden run --issue 196 --at 43f3851^ --yes` (run `20261010-111217-7c89`) fetched the issue, then

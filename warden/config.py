@@ -17,6 +17,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 MAX_THEATER_RETRIES = 3  # doctor checks WARDEN_THEATER_RETRIES against it
 MAX_CANDIDATES = 8  # best-of-N upper bound (doctor checks WARDEN_CANDIDATES against it)
+SERVER_MAX_TOKENS = 8192  # Token Factory's completion budget when a request sends no max_tokens
+MAX_IMPLEMENTER_TOKENS = 32768  # the largest budget probed live for Super (24980 tokens returned)
 
 
 class Role(StrEnum):
@@ -71,6 +73,13 @@ class Settings(BaseSettings):
     # Re-reading an unchanged file/range still in the model's context gets a short "you already
     # have it" reply instead of the content again
     read_cache: bool = Field(default=True, alias="WARDEN_READ_CACHE")
+    # Implementer completion budget (max_tokens; reasoning tokens count against it). Token
+    # Factory's default when none is sent is 8192, and Super's whole-file write_file replies were
+    # cut there (camp-head-1-210); with max_tokens=32768 it returned 24980 tokens, finish=stop
+    # (probe 2026-10-15). 0 = send none (the server default, 8192).
+    implementer_max_tokens: int = Field(
+        default=16384, ge=0, le=MAX_IMPLEMENTER_TOKENS, alias="WARDEN_IMPLEMENTER_MAX_TOKENS"
+    )
     base_image: str = Field(default="warden/fabric-base:latest", alias="WARDEN_BASE_IMAGE")
     workdir: str = Field(default="/src", alias="WARDEN_WORKDIR")
     gate_profile: str = Field(default="fabric", alias="WARDEN_GATE_PROFILE")

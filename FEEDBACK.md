@@ -216,6 +216,24 @@ Every entry: date · tool · what happened · numbers · what would have helped.
   were 900-line test modules. A 60-turn, best-of-2 retry cost $2.21 for 5 issues and fixed none
   (the 40-turn single run: $1.11 for 6, 1 fixed). → a Super sampling or prompt recipe for
   long-file editing (page through, then `str_replace`) would directly raise the fix rate.
+- 2026-10-15 · inference · Token Factory's completion budget for Nemotron 3 Super when a request
+  sends no `max_tokens` is **8192** (finish_reason=length). With `max_tokens=32768`, the same
+  echo prompt (25k prompt tokens) returned **24980 tokens, finish=stop, 83 s**. So the 8192 that
+  cut Super's whole-file `write_file` replies is a default, not a model limit. Warden now sends
+  16384 (`WARDEN_IMPLEMENTER_MAX_TOKENS`). → document the per-model default and maximum
+  `max_tokens` on the model card.
+- 2026-10-15 · Nemotron 3 Super · tool loop · Super keeps calling `read_file` on text it already
+  has, whatever the tool result says. In `camp-replay-212-c` (6 Fabric issues, 40 turns) Warden
+  answered a repeat read with a cached note and, from the 3rd repeat, an explicit "STOP: reading
+  again shows nothing new; your next call must be replace_in_file / write_file / run_shell /
+  finish". It still re-read **87 times** across 6 runs (16 on #196's 50-line test file, 13 of them
+  after the STOP text), and **0 of 6 runs edited a source file**. Median completion was ~100
+  tokens a turn. Thinking is on by default but short: 62 reasoning chars on a probe tool turn.
+  Withholding the read tools from the `tools` list for 3 turns ("edit mode") worked where the
+  text did not. In `camp-replay-212-d`: 5 of 6 runs edited source, 26 `replace_in_file` calls
+  (0 before), 32 cached re-reads. → a recommended sampling setup for agentic tool loops
+  (temperature, repetition controls) on the Super model card. A repeat-call penalty or a "you
+  already called this" signal would help any agent framework.
 - (fill in after Phase B3) Lightning as a tool router: turn count, wrong-tool rate.
 
 ## Nebius Serverless

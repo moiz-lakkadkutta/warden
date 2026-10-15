@@ -23,7 +23,8 @@ if TYPE_CHECKING:
 T = TypeVar("T", bound=BaseModel)
 
 # Completion budgets per role. Reasoning tokens count against max_tokens, and Ultra used up the
-# server default (8192) before finishing a Plan's JSON (A5). None = server default.
+# server default (8192) before finishing a Plan's JSON (A5). None = server default. The
+# implementer's comes from Settings.implementer_max_tokens (WARDEN_IMPLEMENTER_MAX_TOKENS).
 MAX_TOKENS: dict[Role, int | None] = {
     Role.PLANNER: 16384,
     Role.VERDICT: 16384,
@@ -114,6 +115,8 @@ class LLM:
         temp = self.temperature if temperature is None else temperature
         kwargs: dict[str, Any] = {"model": model, "messages": messages, "temperature": temp}
         budget = max_tokens if max_tokens is not None else MAX_TOKENS.get(role)
+        if budget is None and role is Role.IMPLEMENTER and self._s.implementer_max_tokens:
+            budget = self._s.implementer_max_tokens
         if budget is not None:
             kwargs["max_tokens"] = budget
         if response_format:

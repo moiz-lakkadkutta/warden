@@ -173,5 +173,109 @@
     "gate": "not run (nothing merged)",
     "gate_ok": null,
     "integration_branch": ""
+  },
+  {
+    "campaign": "camp-replay-212-c",
+    "at": "43f3851^",
+    "base_sha": "fb19cde68d37146f6ef4228507fa122a520b6906",
+    "wave": 1,
+    "issues": [
+      196,
+      197,
+      205,
+      207
+    ],
+    "merged": [],
+    "not_merged": {
+      "196": "no candidate to merge (FAIL or error)",
+      "197": "no candidate to merge (FAIL or error)",
+      "205": "no candidate to merge (FAIL or error)",
+      "207": "no candidate to merge (FAIL or error)"
+    },
+    "image": "38ed836d-47bf-4a98-a1d2-0faa3daaf64c",
+    "sha": "fb19cde68d37146f6ef4228507fa122a520b6906",
+    "gate": "not run (nothing merged)",
+    "gate_ok": null,
+    "integration_branch": ""
+  },
+  {
+    "campaign": "camp-replay-212-c",
+    "at": "43f3851^",
+    "base_sha": "fb19cde68d37146f6ef4228507fa122a520b6906",
+    "wave": 2,
+    "issues": [
+      200,
+      206
+    ],
+    "merged": [],
+    "not_merged": {
+      "200": "no candidate to merge (FAIL or error)",
+      "206": "no candidate to merge (FAIL or error)"
+    },
+    "image": "38ed836d-47bf-4a98-a1d2-0faa3daaf64c",
+    "sha": "fb19cde68d37146f6ef4228507fa122a520b6906",
+    "gate": "not run (nothing merged)",
+    "gate_ok": null,
+    "integration_branch": ""
+  },
+  {
+    "campaign": "camp-replay-212-d",
+    "at": "43f3851^",
+    "base_sha": "fb19cde68d37146f6ef4228507fa122a520b6906",
+    "wave": 1,
+    "issues": [
+      196,
+      197,
+      200,
+      205
+    ],
+    "merged": [],
+    "not_merged": {
+      "196": "no candidate to merge (FAIL or error)",
+      "197": "no candidate to merge (FAIL or error)",
+      "200": "no candidate to merge (FAIL or error)",
+      "205": "no candidate to merge (FAIL or error)"
+    },
+    "image": "4746b2d1-58d0-4c73-b08d-3d6817d752d0",
+    "sha": "fb19cde68d37146f6ef4228507fa122a520b6906",
+    "gate": "not run (nothing merged)",
+    "gate_ok": null,
+    "integration_branch": ""
+  },
+  {
+    "campaign": "camp-replay-212-d",
+    "at": "43f3851^",
+    "base_sha": "fb19cde68d37146f6ef4228507fa122a520b6906",
+    "wave": 2,
+    "issues": [
+      206
+    ],
+    "merged": [],
+    "not_merged": {
+      "206": "no candidate to merge (FAIL or error)"
+    },
+    "image": "4746b2d1-58d0-4c73-b08d-3d6817d752d0",
+    "sha": "fb19cde68d37146f6ef4228507fa122a520b6906",
+    "gate": "not run (nothing merged)",
+    "gate_ok": null,
+    "integration_branch": ""
+  },
+  {
+    "campaign": "camp-replay-212-d",
+    "at": "43f3851^",
+    "base_sha": "fb19cde68d37146f6ef4228507fa122a520b6906",
+    "wave": 3,
+    "issues": [
+      207
+    ],
+    "merged": [],
+    "not_merged": {
+      "207": "no candidate to merge (FAIL or error)"
+    },
+    "image": "4746b2d1-58d0-4c73-b08d-3d6817d752d0",
+    "sha": "fb19cde68d37146f6ef4228507fa122a520b6906",
+    "gate": "not run (nothing merged)",
+    "gate_ok": null,
+    "integration_branch": ""
   }
 ]

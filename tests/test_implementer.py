@@ -88,6 +88,7 @@ def _run(
     *,
     max_tool_turns: int = 25,
     progress: RecordingProgress | None = None,
+    **kw: Any,
 ) -> tuple[ScriptedLLM, Candidate]:
     llm = ScriptedLLM(script, log=env.log)
     cand = run_implementer(
@@ -98,6 +99,7 @@ def _run(
         dispatcher=env.dispatcher,
         max_tool_turns=max_tool_turns,
         progress=progress,
+        **kw,
     )
     return llm, cand
 
@@ -209,7 +211,7 @@ def test_budget_exhaustion(log: EventLog) -> None:
     env = _setup(log)
     # list_files: a repeated read_file would be answered from the read cache, not dispatched
     script = [turn(tool_call("list_files", path=".")) for _ in range(25)]
-    llm, cand = _run(env, script)
+    llm, cand = _run(env, script, idle_nudge_after=0)  # nudges would switch edit mode on
     assert cand.tool_turns == 25 == env.dispatcher.calls
     assert cand.image_uuid == env.base.uuid
     assert cand.tests_added == []
