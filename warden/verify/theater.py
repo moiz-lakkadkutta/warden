@@ -182,16 +182,21 @@ def theater_check(
     test_cmd: str = DEFAULT_CMD,
     candidate: Box | None = None,
     issue_text: str = "",
+    db_prefix: str = "",
 ) -> TheaterResult:
     """`new_tests` maps repo-relative test file paths to their candidate content; `node_ids`
     (default: the files) are what runs. `wrap` starts services, as for run_shell. With
     `candidate`, the same tests also run there: a test red with the fix is no repro. An exception
-    named in `issue_text` (e.g. "raises TypeError") is the behaviour, not a broken test."""
+    named in `issue_text` (e.g. "raises TypeError") is the behaviour, not a broken test.
+    `db_prefix` (a Fabric replay) creates + migrates a scratch DB at the rev's head first."""
+    from warden.verify.gate import apply_db_prefix
+
     if not new_tests:
         raise ValueError("theater check needs at least one new test file")
     probe = base.copy_in(new_tests, cwd=cwd)
     targets = node_ids or sorted(new_tests)
-    command = keep_tail(f"{test_cmd} {' '.join(shlex.quote(t) for t in targets)}")
+    run_cmd = apply_db_prefix(f"{test_cmd} {' '.join(shlex.quote(t) for t in targets)}", db_prefix)
+    command = keep_tail(run_cmd)
     if wrap:
         command = f"{wrap} {shlex.quote(command)}"
     res = probe.run(command, cwd=cwd, keep=False)

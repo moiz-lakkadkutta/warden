@@ -99,6 +99,26 @@ the image's newer head (an audit-log immutability trigger postdates `d9c37cb^`),
 rev's. Candidate 1: invalid repro, 41 failures, mypy red. Follow-up: run the replay gate on a scratch
 DB migrated to the `--at` rev (as `hunt --at` already does), so old tests see their own schema.
 
+### B4 fix: replay gate on the rev's own schema (2026-10-15, offline + 1 live check, $0)
+
+The follow-up from the #227 replay. On `run --at <rev>` / verify replays with the **Fabric**
+profile, the gate's suite, the theater check and the regression check now run against a fresh
+scratch DB (`warden_replay_gate`) migrated to the **rev's** alembic head, the way `hunt --at`
+already did. Before, they reused the image's `test` DB at the newer head, so an old test tripped
+constraints that postdate the rev (`test_rls_blocks_cross_org_item_reads` → "audit_log is
+immutable"). `verify/gate.py`: `replay_db_prefix()` (drop+create, `alembic upgrade head`, export
+`DATABASE_URL`/`MIGRATION_DATABASE_URL`; superuser `postgres`, local trust) and
+`apply_db_prefix()`; threaded as `db_prefix` into `run_gate` (suite only — mypy/ruff/openapi/the
+single-head check unchanged), `theater_check` and `regression_check`; `verify_candidate` sets it
+only when `at_rev` is set and `gate_profile == "fabric"`. The generic/swe/tests profiles are
+unchanged. 6 offline tests.
+
+Live check (one sandbox run, no model calls): `d9c37cb^` checked out, `replay_db_prefix()` migrated
+the scratch DB to `tfix6_backfill_pii_read` (that rev's head), then
+`pytest …::test_rls_blocks_cross_org_item_reads` **exited 0** — the test passes on the rev's
+schema. (pytest exits 5 if nothing is collected and 1 on failure; the PASSED line itself was pushed
+out of the captured tail by alembic's log.)
+
 ## Phase A spike: done (A3–A7 live on Nebius)
 
 | Step | Commit | Result |

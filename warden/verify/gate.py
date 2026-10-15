@@ -97,6 +97,38 @@ PROFILES: dict[str, GateCommands] = {
 }
 
 
+# --- replay gate DB -------------------------------------------------------------------------
+# On a `--at <rev>` replay the base image's `test`/`fabric_demo` DB is migrated to the image's
+# (newer) head, so an old test can trip a constraint that postdates the rev (e.g. the audit-log
+# immutability trigger → `test_rls_blocks_cross_org_item_reads` fails with "audit_log is
+# immutable"). The suite, theater and regression runs therefore run against a fresh scratch DB
+# migrated to the *rev's* alembic head, mirroring `hunt --at`. Fabric-only; superuser `postgres`
+# (local trust) both migrates and connects — the one DB-bound test that needs RLS enforced
+# (`test_rls_blocks_cross_org_item_reads`) creates its own non-bypassrls role internally.
+REPLAY_GATE_DB = "warden_replay_gate"
+_REPLAY_URL = f"postgresql+asyncpg://postgres@127.0.0.1:5432/{REPLAY_GATE_DB}"
+_REPLAY_ADMIN = "postgresql://postgres@127.0.0.1:5432/postgres"
+
+
+def replay_db_prefix(backend_dir: str = "backend") -> str:
+    """A POSIX-sh snippet: drop+create the scratch DB, `alembic upgrade head` to the checked-out
+    commit's schema, and export DATABASE_URL/MIGRATION_DATABASE_URL at it. Prepended (via
+    :func:`apply_db_prefix`) to the DB-bound commands. Runs with cwd at the repo root; the commit
+    must already be checked out (``run --at`` / ``_base_box`` do that)."""
+    env = f'DATABASE_URL="{_REPLAY_URL}" MIGRATION_DATABASE_URL="{_REPLAY_URL}"'
+    return (
+        f'psql "{_REPLAY_ADMIN}" -v ON_ERROR_STOP=1 '
+        f'-c "DROP DATABASE IF EXISTS {REPLAY_GATE_DB}" -c "CREATE DATABASE {REPLAY_GATE_DB}" '
+        f"&& ( cd {backend_dir} && {env} alembic upgrade head ) "
+        f"&& export {env}"
+    )
+
+
+def apply_db_prefix(command: str, db_prefix: str) -> str:
+    """Prepend ``db_prefix`` to ``command`` (both run in one shell, so the export carries over)."""
+    return f"{db_prefix} && {command}" if db_prefix and command else command
+
+
 def with_test_cmd(commands: GateCommands, test_cmd: str) -> GateCommands:
     """`commands` with the suite step replaced by the repo's own test command (when set)."""
     return replace(commands, suite=test_cmd) if test_cmd.strip() else commands
@@ -214,9 +246,11 @@ def run_gate(
     cwd: str = "/app",
     timeout: int = 900,
     wrap: str = "",
+    db_prefix: str = "",
 ) -> GateResult:
     """Run every gate command on disposable forks of `candidate`; never raises on a red command.
-    `wrap` (e.g. `with-services sh -c`) prefixes every command; steps record the plain one."""
+    `wrap` (e.g. `with-services sh -c`) prefixes every command; steps record the plain one.
+    `db_prefix` (a Fabric replay) prepends a scratch-DB create+migrate to the DB-bound suite."""
     t0 = time.perf_counter()
     steps: list[GateStep] = []
 
@@ -238,7 +272,10 @@ def run_gate(
         return res.box
 
     c = commands
-    suite = step("suite", candidate, c.suite, keep_end=True, keep=False, timeout=timeout)
+    suite = step(
+        "suite", candidate, apply_db_prefix(c.suite, db_prefix),
+        keep_end=True, keep=False, timeout=timeout,
+    )  # fmt: skip
     mypy = step("mypy", candidate, c.mypy, keep=False)
     ruff_check = step("ruff_check", candidate, c.ruff_check, keep=False)
     ruff_format = step("ruff_format", candidate, c.ruff_format, keep=False)

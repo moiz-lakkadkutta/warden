@@ -387,3 +387,10 @@ def test_a_file_target_and_its_own_node_are_not_counted_twice(tmp_path: Path) ->
         node_ids=[CD9B_FILE, node],
     )
     assert list(res.reasons) == CD9B_TESTS
+
+
+def test_theater_db_prefix_is_prepended_to_the_run(tmp_path: Path) -> None:
+    stub = PytestStub(RA_OUT, 1)
+    theater_check(_box(tmp_path, stub), {"f.py": b""}, node_ids=[REPRO], db_prefix="PFX_X")
+    pytest_runs = [r for r in stub.runs if "pytest" in r["shell"]]
+    assert pytest_runs and all("PFX_X &&" in r["shell"] for r in pytest_runs)

@@ -183,10 +183,13 @@ def regression_check(
     wrap: str = "",
     max_files: int = MAX_FILES,
     timeout: int = 900,
+    db_prefix: str = "",
 ) -> RegressionResult:
     """`RegressionResult.not_run(...)` when the candidate changed no Python module or no existing
     test file relates to one: an explicit gap, never a green row. `timeout` bounds each of the
-    two pytest runs, so the check costs at most 2 × timeout. Every command is POSIX sh (dash)."""
+    two pytest runs, so the check costs at most 2 × timeout. Every command is POSIX sh (dash).
+    `db_prefix` (a Fabric replay) creates + migrates a scratch DB at the rev's head on each box."""
+    from warden.verify.gate import apply_db_prefix
 
     def wrapped(cmd: str) -> str:
         return f"{wrap} {shlex.quote(cmd)}" if wrap else cmd
@@ -209,7 +212,7 @@ def regression_check(
     contents = {
         f: base.run(f"cat {shlex.quote(f)}", cwd=cwd, keep=False).stdout.encode() for f in files
     }
-    command = f"{test_cmd} {' '.join(shlex.quote(f) for f in files)}"
+    command = apply_db_prefix(f"{test_cmd} {' '.join(shlex.quote(f) for f in files)}", db_prefix)
     on_base = base.run(wrapped(keep_tail(command)), cwd=cwd, keep=False, timeout=timeout)
     probe = candidate.copy_in(contents, cwd=cwd)
     on_cand = probe.run(wrapped(keep_tail(command)), cwd=cwd, keep=False, timeout=timeout)

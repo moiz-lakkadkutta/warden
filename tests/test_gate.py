@@ -317,3 +317,43 @@ def test_fabric_profile_has_lint_and_autofix() -> None:
     assert f.lint == "cd backend && ruff check . && ruff format --check ."
     assert f.autofix == "cd backend && ruff format . && ruff check --fix ."
     assert PROFILES["generic"].autofix == ""
+
+
+# --- replay gate DB (B4) ---------------------------------------------------------------------
+def test_apply_db_prefix() -> None:
+    from warden.verify.gate import apply_db_prefix
+
+    assert apply_db_prefix("pytest -q", "PFX") == "PFX && pytest -q"
+    assert apply_db_prefix("pytest -q", "") == "pytest -q"  # no prefix: unchanged
+    assert apply_db_prefix("", "PFX") == ""  # empty command stays empty (skipped step)
+
+
+def test_replay_db_prefix_migrates_scratch_db() -> None:
+    from warden.verify.gate import REPLAY_GATE_DB, replay_db_prefix
+
+    pfx = replay_db_prefix()
+    assert f"CREATE DATABASE {REPLAY_GATE_DB}" in pfx
+    assert f"DROP DATABASE IF EXISTS {REPLAY_GATE_DB}" in pfx
+    assert "alembic upgrade head" in pfx and "cd backend" in pfx
+    assert "export DATABASE_URL=" in pfx and REPLAY_GATE_DB in pfx
+
+
+def test_run_gate_prepends_db_prefix_to_suite_only(log: EventLog) -> None:
+    from warden.verify.gate import PROFILES, run_gate
+
+    rec = _Recorder()
+    run_gate(Box(rec, "c", log), log, commands=PROFILES["fabric"], db_prefix="PFX_SENTINEL")
+    suite = next(r for r in rec.runs if "pytest" in str(r["shell"]))
+    assert "PFX_SENTINEL" in str(suite["shell"])
+    # mypy / ruff / openapi must NOT carry the DB prefix
+    non_suite = [r for r in rec.runs if "pytest" not in str(r["shell"])]
+    assert non_suite and all("PFX_SENTINEL" not in str(r["shell"]) for r in non_suite)
+
+
+def test_run_gate_no_prefix_leaves_suite_plain(log: EventLog) -> None:
+    from warden.verify.gate import PROFILES, run_gate
+
+    rec = _Recorder()
+    run_gate(Box(rec, "c", log), log, commands=PROFILES["fabric"])
+    suite = next(r for r in rec.runs if "pytest" in str(r["shell"]))
+    assert "warden_replay_gate" not in str(suite["shell"])

@@ -826,6 +826,13 @@ def verify_candidate(
     s = ctx.settings
     base = _base_box(ctx, "verify")
     candidate = base.sibling(cand.image_uuid)
+    # Replay: run the DB-bound checks against a scratch DB migrated to the rev's head, so old
+    # tests see the rev's schema, not the base image's newer one (Fabric profile only).
+    db_prefix = ""
+    if ctx.at_rev and s.gate_profile == "fabric":
+        from warden.verify.gate import replay_db_prefix
+
+        db_prefix = replay_db_prefix()
     theater = None
     if cand.tests_added:
         files = sorted({n.split("::", 1)[0] for n in cand.tests_added})
@@ -841,6 +848,7 @@ def verify_candidate(
             wrap=s.shell_wrap,
             candidate=candidate,
             issue_text=f"{ctx.issue.title}\n{ctx.issue.body}" if ctx.issue else "",
+            db_prefix=db_prefix,
         )
         ctx.log.artifact(
             "theater.txt",
@@ -868,6 +876,7 @@ def verify_candidate(
         cwd=s.workdir,
         wrap=s.shell_wrap,
         timeout=suite_timeout,
+        db_prefix=db_prefix,
     )
     ctx.log.artifact(
         "gate.txt",
@@ -879,7 +888,13 @@ def verify_candidate(
     regression = None
     if regression_cmd:
         regression = regression_check(
-            base, candidate, test_cmd=regression_cmd, cwd=s.workdir, wrap=s.shell_wrap, timeout=600
+            base,
+            candidate,
+            test_cmd=regression_cmd,
+            cwd=s.workdir,
+            wrap=s.shell_wrap,
+            timeout=600,
+            db_prefix=db_prefix,
         )
         ctx.log.note("verify", f"regression: {regression.label}")
         ctx.progress.step(f"regression: {regression.label}")

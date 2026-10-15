@@ -251,3 +251,13 @@ def test_no_related_test_file_is_an_explicit_not_run(tmp_path: Path) -> None:
     res = regression_check(base, cand, test_cmd=CMD, cwd="/testbed")
     assert not res.ran and "frobnicate" in res.skipped
     assert not any("pytest" in r["shell"] for r in stub.runs)
+
+
+def test_db_prefix_is_prepended_to_both_runs(tmp_path: Path) -> None:
+    # A Fabric replay: the scratch-DB create+migrate must run before pytest on BOTH boxes.
+    stub = ShellStub(_rules(cand_out=BASE_OUT, cand_exit=1))
+    base, cand = _boxes(tmp_path, stub)
+    regression_check(base, cand, test_cmd=CMD, cwd="/src", db_prefix="PFX_SENTINEL")
+    pytest_runs = [r for r in stub.runs if "pytest" in r["shell"]]
+    assert len(pytest_runs) == 2
+    assert all("PFX_SENTINEL &&" in r["shell"] for r in pytest_runs)
