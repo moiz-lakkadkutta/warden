@@ -30,6 +30,11 @@ MAX_TOKENS: dict[Role, int | None] = {
     Role.IMPLEMENTER: None,
     Role.TOOLS: None,
 }
+# Roles sent with thinking off (chat_template_kwargs.enable_thinking=false). Lightning's jobs are
+# short extractions (research queries, prose → tool calls); with thinking on it spent 8192 of
+# 8192 completion tokens reasoning before the JSON and the plan step failed (camp-head-1-210,
+# 2026-10-15). Thinking off: 72 tokens, 0.5 s, same answer.
+NO_THINKING: frozenset[Role] = frozenset({Role.TOOLS})
 
 
 class ProviderBudgetError(RuntimeError):
@@ -49,6 +54,23 @@ class ChatResult:
     completion_tokens: int = 0
     model: str = ""
     raw: Any = None
+
+
+def _schema_echo[M: BaseModel](content: str, schema: type[M]) -> M | None:
+    """In json_object mode Lightning has answered with the schema envelope itself and the
+    instance under `properties` ({"title": ..., "type": "object", "properties": {<answer>}}).
+    Accept that answer when it validates; anything else stays a validation failure."""
+    try:
+        data = json.loads(content)
+    except ValueError:
+        return None
+    inner = data.get("properties") if isinstance(data, dict) else None
+    if not isinstance(inner, dict) or "type" not in data:
+        return None
+    try:
+        return schema.model_validate(inner)
+    except ValidationError:
+        return None
 
 
 class LLM:
@@ -96,6 +118,8 @@ class LLM:
             kwargs["max_tokens"] = budget
         if response_format:
             kwargs["response_format"] = response_format
+        if role in NO_THINKING:
+            kwargs["extra_body"] = {"chat_template_kwargs": {"enable_thinking": False}}
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
@@ -180,6 +204,9 @@ class LLM:
                 return schema.model_validate_json(result.content or "")
             except ValidationError as err:
                 last_err = err
+                echoed = _schema_echo(result.content or "", schema)
+                if echoed is not None:
+                    return echoed
                 messages.append({"role": "assistant", "content": result.content or ""})
                 messages.append(
                     {
