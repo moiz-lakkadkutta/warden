@@ -584,7 +584,7 @@ def write_markdown(path: Path, tables: str) -> None:
         if BEGIN in text and END in text:
             pre, _, rest = text.partition(BEGIN)
             _, _, post = rest.partition(END)
-            path.write_text(pre + block + post.lstrip("\n"), encoding="utf-8")
+            path.write_text(pre + block + "\n" + post.lstrip("\n"), encoding="utf-8")
             return
     path.write_text(_MD_HEAD + block + "\n## Notes\n\n(to be written)\n", encoding="utf-8")
 

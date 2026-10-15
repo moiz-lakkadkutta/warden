@@ -177,6 +177,13 @@ Every entry: date · tool · what happened · numbers · what would have helped.
   tells the model the reply was cut and to use `replace_in_file` (54747c7). → expose
   `finish_reason=length` on truncated tool calls (or reject them) instead of delivering a
   partial argument object.
+- 2026-10-15 · Fabric campaign (E2) · On a real ERP codebase, Nemotron 3 Super's tool loop is
+  the bottleneck. In 13 of 15 attempts across 9 issues, it never called `finish` (40 or 60 turns).
+  In single runs, Warden's "unchanged since turn N, you already have it" reply to a repeat
+  `read_file` fired 30 (#200, 40 turns), 71 (#197, 60×2) and 86 (#200, 60×2) times; the files
+  were 900-line test modules. A 60-turn, best-of-2 retry cost $2.21 for 5 issues and fixed none
+  (the 40-turn single run: $1.11 for 6, 1 fixed). → a Super sampling or prompt recipe for
+  long-file editing (page through, then `str_replace`) would directly raise the fix rate.
 - (fill in after Phase B3) Lightning as a tool router: turn count, wrong-tool rate.
 
 ## Nebius Serverless

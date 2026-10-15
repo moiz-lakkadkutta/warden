@@ -1,0 +1,47 @@
+{
+  "run": "merge-live-1792088102",
+  "base": "8ea65664-e287-4f02-9448-5cad1a48c952",
+  "seconds": 696,
+  "outcomes": [
+    {
+      "issue": 196,
+      "merged": true,
+      "reason": "",
+      "sha": "5243edd94cb25c2528ec6984e13806b667ff51e4",
+      "image_uuid": "562a99a1-21b1-4b18-9d2a-141c052d0c80"
+    },
+    {
+      "issue": 197,
+      "merged": true,
+      "reason": "",
+      "sha": "6b7cc44f36c13afc8b8eeef428cfb8de1a78aeda",
+      "image_uuid": "e78cbe4e-4181-40dd-b1f3-f7deeded2cb2"
+    },
+    {
+      "issue": 205,
+      "merged": true,
+      "reason": "",
+      "sha": "ce46a01296eac0e501dd509755ef3168e9b447a6",
+      "image_uuid": "9dca6b4d-0c16-4a5d-98b7-c1b925baa17f"
+    },
+    {
+      "issue": 206,
+      "merged": true,
+      "reason": "",
+      "sha": "dfca05f1d9cd8d6ff90a0cbbaef81b88dd77fdea",
+      "image_uuid": "78ef6d90-4967-4925-962c-e81e2b1681a4"
+    }
+  ],
+  "final_image": "78ef6d90-4967-4925-962c-e81e2b1681a4",
+  "sha": "dfca05f1d9cd8d6ff90a0cbbaef81b88dd77fdea",
+  "gate": {
+    "suite": {
+      "failed": 6,
+      "passed": 1506
+    },
+    "mypy": false,
+    "ruff": false,
+    "alembic": true,
+    "drift": false
+  }
+}

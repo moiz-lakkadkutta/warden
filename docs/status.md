@@ -264,6 +264,63 @@ Offline only (fake sandbox, scripted LLM); not yet measured live.
 - To measure on the next eval, count from events: `refused_shrink` and `finish_nudge` notes,
   `replace_in_file` calls vs `write_file`, and turns-to-finish.
 
+### 1i. D2 merger + E2 Fabric campaign (2026-10-15): 1 of 9 PASS, $4.81, merger works live
+
+**Built (offline-tested, fake sandbox):**
+- `integrate/merger.py` (D2). Each candidate leaves its sandbox as a patch. Inside the
+  integration image it becomes `fix/N` on the wave base and is merged with
+  `git merge --no-ff fix/N` into `warden/integration`: one kept run per issue, a fork chain. A
+  failed `git am` or a conflicting merge FAILs that issue (with the conflicting paths), and the
+  chain goes on from the last good image. The gate runs on the merged image, and the next wave
+  forks it.
+- `warden campaign --issues N,N --at <rev>|(head) --name <id> --yes`
+  (`eval/campaign.py`):
+  1. Prepares the base: a commit the image lacks arrives as a host-made git bundle
+     (`branch.bundle_rev`), then checkout, then `alembic upgrade head` when the commit is newer
+     than the image.
+  2. Plans every issue in parallel, then runs `plan_waves(max_wave_size=WARDEN_MAX_FORKS)`.
+  3. Per wave: fix → verify → PR, in parallel. Each issue is an ordinary run,
+     `runs/<campaign>-<issue>/`.
+  4. Merges the wave, runs the gate, and pushes `warden/campaign-<id>-w<k>` on the target
+     (`branch.push_integration_branch`) so later waves' draft PRs stack on it.
+  5. Writes `evals/fabric/campaign.csv`, `waves.json` and `campaign.md`. The generated block sits
+     between markers, so hand-written notes survive.
+
+  Rows are keyed by (campaign, issue). Re-running with the same `--name` resumes from the
+  markers. A per-issue error (the cost cap included) becomes a row; a 402 stops the campaign.
+- Pipeline: `StepContext.base_ready` (skip the `--at` checkout on a prepared or integration
+  image) and `pr_base` (push onto a stacked branch). Both are kept in run.json.
+
+**Fixed along the way (live friction, FEEDBACK.md):**
+- `8fb5576`: Lightning calls now run with `chat_template_kwargs.enable_thinking=false`. Before,
+  Lightning burned 8192/8192 completion tokens reasoning before ResearchQueries, twice, and the
+  plan step failed. A schema-echo envelope from `json_object` mode is now unwrapped.
+- `54747c7`: a `write_file` with no `content` (the reply was cut at 8192 tokens) now tells Super
+  to use `replace_in_file`.
+
+**Live results** (cap $1.50/issue; full table and notes in `evals/fabric/campaign.md`):
+- 9 issues: #210 open at head, plus 8 closed issues replayed at their pre-fix commits.
+  15 attempts in two configs: A = 40 turns × 1 candidate; B = 60 turns × best-of-2.
+- **1 PASS (#196 → [Fabric#226](https://github.com/moiz-lakkadkutta/Fabric-Inventory/pull/226),
+  Fabric CI 7/7 green, $0.11)**, 8 FAIL, 0 PRs from a FAIL, PENDING-HUMAN on 13 of 15 rows.
+- Cause: Super never called `finish` in 13 of 15 attempts. It loops on 900-line test files:
+  up to 86 "unchanged since turn N" re-reads per run, and whole-file rewrites cut at 8192 tokens.
+  Config B fixed nothing more and cost about 2.5× per issue.
+- Hunter issues #225 and #227 appeared mid-campaign. The Hunter session ran them itself: both
+  FAIL, no PR.
+- Baseline at Fabric head on the prepared base: 2243 passed, gate fully green, 1107 s.
+- **D2 live:** in the campaigns no wave had more than one PASS. The #196 merge and its gate were
+  green, and `warden/campaign-camp-replay-212-w1` was pushed. As a mechanics check (no LLM), 4 real
+  candidates (#196 #197 #205 #206) merged with `--no-ff` onto one base, as a 4-step fork chain
+  with no conflicts. The gate on the result was red (6 failed, mypy ✗, ruff ✗), as it should be
+  with 3 FAIL candidates in it (`evals/fabric/merge-live.json`).
+- **Spend 2026-10-15: $4.82** (campaigns $4.81 + probes).
+
+**Next:** the implementer's large-file behaviour is the bottleneck on real code: re-read loops,
+and whole-file rewrites past the completion limit. Candidate fixes: cap `read_file` pages for
+files over about 400 lines, and refuse a `write_file` over N kB on an existing file in favour of
+`replace_in_file`. Then re-run `camp-replay-212`, which needs Moiz's OK.
+
 ### 1a. Earlier notes: blocked by Token Factory billing (resolved)
 
 `warden run --issue 196 --at 43f3851^ --yes` (run `20261010-111217-7c89`) fetched the issue, then
