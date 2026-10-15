@@ -186,9 +186,22 @@ if you want CI on them.
 
 - The Hunter (finding bugs before fixing them) is designed but not yet shipped; issues come from
   GitHub or the benchmark.
-- SWE-rebench issues are often under-specified: a hidden test can require an interface the issue
-  never names. A verifier that only reads the issue cannot catch those, and the false-PASS rate
-  is reported with that in mind, not hidden.
+- **A PASS is evidence, not proof.** SWE-rebench issues are often under-specified: a hidden test
+  can require an interface or behaviour the issue never names. In the live check of the latest
+  fixes, two of three PASSes had every row green: a repro that fails on base, the related base
+  tests green, and every stated behaviour implemented. The hidden tests still rejected them. A
+  verifier that reads only the issue cannot catch this. The false-PASS rate is reported, not
+  hidden, and every PR is a draft for a human to review.
+- **Run-to-run variance is large.** The same task resolves in some runs and not in others:
+  pennylane resolved in 4 of 6 graded runs on 2026-10-14; one failure came from the model
+  overwriting a 19 kB file with a fragment. Write guards and `replace_in_file` target that.
+  Results at n = 10–50 come with confidence intervals, and single-task anecdotes are not results.
+- **Best-of-N trades cost for rescues.** Three candidates raise the cost per task (pilot 2:
+  $0.13; E1 with N = 3: about $0.52). Early stop means a false PASS on candidate 1 is never
+  challenged by candidates 2 and 3, so best-of-N rescues FAILs, not false PASSes.
+- **Sandboxes beta transport errors.** 7 of 49 E1 tasks first ended in an error on a timed-out or
+  dropped `GET /operations/{id}` poll. Runs are now retried on those, and the affected tasks were
+  re-run. The numbers are in [FEEDBACK.md](FEEDBACK.md).
 - End-to-end runs so far target one codebase, [Fabric-Inventory](https://github.com/moiz-lakkadkutta/Fabric-Inventory)
   (FastAPI + Postgres ERP); the SWE-rebench sample is the cross-repo evidence.
 - Nemotron vs frontier models: we report what these models do on our harness and do not compare

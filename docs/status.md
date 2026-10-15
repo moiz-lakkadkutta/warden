@@ -264,6 +264,28 @@ Offline only (fake sandbox, scripted LLM); not yet measured live.
 - To measure on the next eval, count from events: `refused_shrink` and `finish_nudge` notes,
   `replace_in_file` calls vs `write_file`, and turns-to-finish.
 
+### 1i. Live smoke of the 1h fixes (2026-10-14): 3 tasks, 1 resolved, 2 false PASS with every check green
+
+`WARDEN_MAX_TOOL_TURNS=60 warden eval --out evals/swe_rebench/smoke-fixes --candidates 1 --max-usd 1`
+on `2e7bfa9`, on the three pilot-3 failure shapes. Results: `evals/swe_rebench/smoke-fixes/results.csv`.
+
+| task | pilot-3 failure | verdict | hidden tests | turns | $ |
+|---|---|---|---|---|---|
+| PennyLaneAI__pennylane-5831 | clobbered `exp.py`, 40 turns | PASS_WITH_CONCERNS | **resolved** | 27 | 0.11 |
+| SpikeInterface__spikeinterface-2775 | regression check selected no test | PASS | not resolved (false PASS) | 30 | 0.11 |
+| python-wheel-build__fromager-352 | green at turn 10, never finished | PASS | not resolved (false PASS) | 44 | 0.13 |
+
+- **The tools work with Super.** It called `replace_in_file` in all three runs (1–2 times each, plus
+  one `write_file` for the new test file), never set `allow_shrink=true`, and no guard or nudge
+  had to fire. pennylane resolved in 27 turns; in pilot 3 it clobbered a file and ran out at 40.
+- **The regression fix works, and the false PASSes remain.** spikeinterface's regression row now
+  ran: `test_curationsorting.py` was selected and its 2 base tests stay green. Theater proved the
+  repro, and the spec review found 3/3 behaviours. fromager had the same picture: 17 base tests
+  green, spec 4/4, two repros that fail on base. In both cases every check the issue text supports
+  is green, and the hidden tests require behaviour that the issue does not state. These are
+  under-specified-issue misses, not a check that failed to fire.
+- **Spend: $0.36.**
+
 ### 1a. Earlier notes: blocked by Token Factory billing (resolved)
 
 `warden run --issue 196 --at 43f3851^ --yes` (run `20261010-111217-7c89`) fetched the issue, then

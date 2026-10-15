@@ -98,6 +98,14 @@ Every entry: date · tool · what happened · numbers · what would have helped.
   present, 13–90 s per task (prepare + base grade + gold grade), parallelism 4. With the two
   grading fixes in, 49/50 grade as the dataset says (F2P fails on the base, gold resolves). The
   outlier is pypa__pip-11987, whose F2P test already passes on the unfixed base.
+- 2026-10-14 · E1 (5 shards × 3 candidates, ~15 runs in flight) · **7 of 49 tasks ended ERROR**
+  polling `GET /sandboxes/v1/operations/{id}`: 5 × `ApiTimeoutError` (read timeout) and 2 ×
+  `ContreeTransportError` (`ReadError`, connection dropped). They hit 299–1856 s into a task, after
+  $0.11–0.60 of model spend each ($2.25 in all, lost). These were not 5xx, so the `8632d19` retry
+  did not apply. Warden now also retries these (`5077c58`), and re-runs the whole command on a new
+  fork. → the same ask as the 500 above: say whether re-polling the same operation id is safe
+  after a read timeout, and give the SDK a built-in poll retry. A dropped poll costs the client a
+  whole command re-run.
 
 ## Token Factory inference
 
