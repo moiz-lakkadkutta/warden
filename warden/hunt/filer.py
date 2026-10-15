@@ -62,7 +62,23 @@ def issue_title(group: list[Finding], *, prefix: str = "") -> str:
     return f"{prefix}[{head.severity}] {reg}{head.title}"
 
 
-def format_body(group: list[Finding], *, preamble: str = "") -> str:
+def attacker_section(attacker: dict[str, object]) -> str:
+    """Render the decoded-JWT evidence block (empty string when there is nothing to show)."""
+    if not attacker:
+        return ""
+    order = ("role", "roles", "is_owner", "firm_id", "org_id", "permissions", "sub",
+             "signup_firm_id", "signup_org_id")  # fmt: skip
+    rows = [(k, attacker[k]) for k in order if k in attacker]
+    rows += [(k, v) for k, v in attacker.items() if k not in dict(rows)]
+    body = "\n".join(f"- `{k}`: `{v}`" for k, v in rows)
+    return (
+        "## Attacker token (decoded JWT claims of the caller)\n"
+        "The write was sent by a token Warden signed up for itself. Its own claims:\n"
+        f"{body}"
+    )
+
+
+def format_body(group: list[Finding], *, preamble: str = "", evidence: str = "") -> str:
     """The strict finding format. One section per endpoint when a cause spans several."""
     head = _head(group)
     lines: list[str] = []
@@ -99,6 +115,9 @@ def format_body(group: list[Finding], *, preamble: str = "") -> str:
         lines.append(f"  - expected: {f.expected}")
         lines.append(f"  - actual: {f.actual}{rid}")
     lines.append("")
+    if evidence:
+        lines.append(evidence)
+        lines.append("")
     lines.append("## Impact")
     lines.append(head.impact or "Cross-tenant data integrity / isolation.")
     lines.append("")
@@ -135,13 +154,15 @@ def file_findings(
     label: str = HUNT_LABEL,
     preamble: str = "",
     title_prefix: str = "",
+    evidence: str = "",
     runner: Runner = subprocess.run,
     log: EventLog | None = None,
 ) -> list[FiledIssue]:
     """File one issue per ``root_cause_key``. With ``no_file`` nothing is sent (dry run).
 
     ``preamble`` is prepended to each body and ``title_prefix`` to each title — used by a
-    historical replay to mark the issue as already-fixed-on-main up front.
+    historical replay to mark the issue as already-fixed-on-main up front. ``evidence`` is an
+    extra body section (e.g. the decoded attacker-token claims).
     """
     groups = group_findings(findings)
     out: list[FiledIssue] = []
@@ -149,7 +170,7 @@ def file_findings(
         ensure_label(repo, label, runner=runner)
     for key, group in groups.items():
         title = issue_title(group, prefix=title_prefix)
-        body = format_body(group, preamble=preamble)
+        body = format_body(group, preamble=preamble, evidence=evidence)
         head = _head(group)
         if no_file:
             out.append(

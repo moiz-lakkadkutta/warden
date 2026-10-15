@@ -110,11 +110,13 @@ def parse_probe_output(stdout: str) -> IdorRun:
     except json.JSONDecodeError as e:
         return IdorRun(error=f"probe result was not valid JSON: {e}")
     observations = [Observation.model_validate(o) for o in data.get("observations", [])]
+    attacker = data.get("attacker") or {}
     return IdorRun(
         observations=observations,
         endpoints_enumerated=int(data.get("endpoints_enumerated", 0)),
         tenants=int(data.get("tenants", 0)),
         error=str(data.get("error", "")),
+        attacker=attacker if isinstance(attacker, dict) else {},
     )
 
 
@@ -152,6 +154,25 @@ def req(method, path, token=None, body=None):
     except Exception:
         parsed = {"raw": raw.decode("utf-8", "replace")[:400]}
     return status, parsed, headers
+
+def decode_jwt(token):
+    # Decode the JWT payload (middle segment) without verifying — evidence about the caller only.
+    import base64
+    try:
+        seg = token.split(".")[1]
+        seg += "=" * (-len(seg) % 4)
+        claims = json.loads(base64.urlsafe_b64decode(seg))
+    except Exception:
+        return {}
+    keep = ("sub", "role", "roles", "org_id", "firm_id", "is_owner", "permissions", "scope")
+    out = {}
+    for k in keep:
+        if k in claims:
+            v = claims[k]
+            if k == "permissions" and isinstance(v, list):
+                v = len(v)  # a count, not the whole catalogue
+            out[k] = v
+    return out
 
 def request_id(headers, body):
     for h in ("x-request-id", "x-correlation-id", "request-id"):
@@ -279,12 +300,19 @@ def add(kind, method, path, status, headers, body, vulnerable, expected, actual,
         "actual": actual,
     })
 
+attacker = {}
+
 def main():
     a = signup("A")
     b = signup("B")
     a_tok = a["access_token"]
     b_tok = b["access_token"]
     b_firm = b["firm_id"]
+    # Evidence about the attacking token: a freshly-signed-up Owner. Decoded JWT claims show its
+    # own role and firm scope — a reader can judge what a firm-scoped check on the token would see.
+    attacker.update(decode_jwt(a_tok))
+    attacker["signup_firm_id"] = a.get("firm_id")
+    attacker["signup_org_id"] = a.get("org_id")
 
     sto, spec, _ = req("GET", "/openapi.json", token=a_tok)
     if sto != 200 or not isinstance(spec, dict):
@@ -338,16 +366,25 @@ def main():
         st, data, hh = req("POST", path, token=a_tok, body=body_live)
         vuln = st in (200, 201)
         guard = isinstance(data, dict) and "not found in this organization" in body_text(data).lower()
+        persisted_org = None
+        if vuln and isinstance(data, dict):
+            persisted_org = data.get("org_id")
         if vuln:
-            actual = "201 PERSISTED a row stamped with org B's firm_id (cross-firm write)"
+            actual = (
+                "%s - the request was ACCEPTED at the HTTP API and the row persisted with "
+                "org_id=%s (the caller's org, from the token) but firm_id=%s (org B's firm). "
+                "The attacking token is a freshly-signed-up Owner whose own JWT firm_id=%s, so the "
+                "body firm_id was never validated against the org on the create path."
+                % (st, persisted_org, b_firm, attacker.get("firm_id"))
+            )
         elif guard:
-            actual = "422 firm-in-org guard rejected it (fixed)"
+            actual = "422 rejected: a firm_id outside the caller's org is refused"
         elif st == 422:
-            actual = "422 request validation (could not reach the firm guard with a synthetic body)"
+            actual = "422 request validation (synthetic body missing required FKs; not reached)"
         else:
             actual = "HTTP %s" % st
         add("cross_firm_write", "POST", path, st, hh, data, vuln,
-            "422 - a body firm_id outside the caller's org must be rejected",
+            "422 - a create carrying a firm_id outside the caller's org must be rejected",
             actual, write_repro("POST", path, body))
 
     print(MARKER)
@@ -356,6 +393,7 @@ def main():
         "endpoints_enumerated": len(get_by_id),
         "tenants": 2,
         "error": "",
+        "attacker": attacker,
         "debug": {"firm_id_posts_swept": swept, "total_paths": len(paths)},
     }))
     print(MARKER)

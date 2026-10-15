@@ -38,6 +38,7 @@ class HuntReport:
     endpoints_enumerated: int = 0
     tenants: int = 0
     probe_error: str = ""
+    attacker: dict[str, object] = field(default_factory=dict)
 
     @property
     def found(self) -> bool:
@@ -79,6 +80,7 @@ def run_hunt(
     endpoints = max((r.endpoints_enumerated for r in runs), default=0)
     tenants = max((r.tenants for r in runs), default=0)
     probe_error = next((r.error for r in runs if r.error), "")
+    attacker = next((r.attacker for r in runs if r.attacker), {})
     confirmed, plausible = findings_from_runs(runs, threshold=reproduce)
     for finding in (*confirmed, *plausible):
         finding.regression_of = baseline.regression_id(finding)
@@ -102,6 +104,7 @@ def run_hunt(
         endpoints_enumerated=endpoints,
         tenants=tenants,
         probe_error=probe_error,
+        attacker=attacker,
     )
 
 
