@@ -1,0 +1,11 @@
+task_id,resolved,verdict,false_pass,false_fail,unverified,theater_catch,tool_turns,usd,seconds,error,candidates,chosen,resolved_candidates
+IAMconsortium__nomenclature-431,0,FAIL,0,0,0,0,25,0.3665,886,,3,3,
+OSOceanAcoustics__echopype-428,0,FAIL,0,0,0,0,60,0.6155,839,,3,1,
+SciCatProject__scitacean-148,0,FAIL,0,0,0,0,60,0.5238,504,,3,1,
+andialbrecht__sqlparse-231,1,PASS,0,0,0,0,36,0.1207,184,,3,1,1
+coverahealth__dataspec-30,0,FAIL,0,0,0,0,60,0.8635,878,,3,2,
+gmr__pamqp-52,0,FAIL,0,0,0,0,60,0.8832,861,,3,3,2
+lightstep__lightstep-tracer-python-106,0,FAIL,0,0,0,0,60,0.7138,2028,,3,3,1
+pre-commit__pre-commit-1997,0,ERROR,0,0,0,0,0,0.2026,1728,"ApiTimeoutError: ApiTimeoutError(request=RequestInfo(url='https://api.tokenfactory.nebius.com/sandboxes/v1/operations/01a13be5-4c49-704e-93d8-093f6b18e002', method='GET'), response=None, timeout_type='read')",1,0,
+pypa__virtualenv-2821,0,ERROR,0,0,0,0,0,0.2029,1145,"ApiTimeoutError: ApiTimeoutError(request=RequestInfo(url='https://api.tokenfactory.nebius.com/sandboxes/v1/operations/01a13c24-ec21-7314-b249-5f21fb00d58b', method='GET'), response=None, timeout_type='read')",1,0,
+pytorch__ignite-1265,0,ERROR,0,0,0,0,0,0.1145,299,"ContreeTransportError: ContreeTransportError(request=RequestInfo(url='https://api.tokenfactory.nebius.com/sandboxes/v1/operations/01a13c34-0bc6-71a9-ade3-df8b2c9c3709', method='GET'), response=None, error='', _raw=ReadError",1,0,

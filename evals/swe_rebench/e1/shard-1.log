@@ -1,0 +1,11 @@
+10 of 10 tasks to run · budget $6.00 · cap $1.50/task · 3 candidate(s)/task · results → evals/swe_rebench/e1/results.shard-1.csv
+✗ Materials-Consortia__optimade-python-tools-670  FAIL  $0.65  1216s  #1 of 3 (hidden tests accept: none)
+✗ Ouranosinc__xclim-413  FAIL  $0.76  818s  #1 of 3 (hidden tests accept: none)
+✗ SpikeInterface__spikeinterface-2775  PASS  $0.37  873s  FALSE PASS  #2 of 3 (hidden tests accept: none)
+✓ asottile__setup-cfg-fmt-41  PASS  $0.58  542s  #3 of 3 (hidden tests accept: 1;2;3)
+✗ crate__crate-python-584  ERROR  $0.56  576s  ApiTimeoutError: ApiTimeoutError(request=RequestInfo(url='https://api.tokenfactory.nebius.com/sandboxes/v1/operations/01a13b0f-5645-729f-af1b-e8cb2a2639ba', method='GET'), response=None, timeout_type='read')
+✗ iossifovlab__gpf-446  FAIL  $0.84  1918s  #1 of 3 (hidden tests accept: none)
+✗ locustio__locust-2663  FAIL  $0.70  1012s  #1 of 3 (hidden tests accept: none)
+<unknown>:167: SyntaxWarning: invalid escape sequence '\ '
+✗ psf__black-3451  ERROR  $0.60  950s  ApiTimeoutError: ApiTimeoutError(request=RequestInfo(url='https://api.tokenfactory.nebius.com/sandboxes/v1/operations/01a13be7-63b1-733b-b7a8-d867207c04a8', method='GET'), response=None, timeout_type='read')
+ran 8 · resolved 1 · spent $5.05

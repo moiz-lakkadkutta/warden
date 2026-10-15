@@ -1,0 +1,11 @@
+task_id,resolved,verdict,false_pass,false_fail,unverified,theater_catch,tool_turns,usd,seconds,error,candidates,chosen,resolved_candidates
+IAMconsortium__nomenclature-431,0,FAIL,0,0,0,0,25,0.3665,886,,3,3,
+OSOceanAcoustics__echopype-428,0,FAIL,0,0,0,0,60,0.6155,839,,3,1,
+SciCatProject__scitacean-148,0,FAIL,0,0,0,0,60,0.5238,504,,3,1,
+andialbrecht__sqlparse-231,1,PASS,0,0,0,0,36,0.1207,184,,3,1,1
+coverahealth__dataspec-30,0,FAIL,0,0,0,0,60,0.8635,878,,3,2,
+gmr__pamqp-52,0,FAIL,0,0,0,0,60,0.8832,861,,3,3,2
+lightstep__lightstep-tracer-python-106,0,FAIL,0,0,0,0,60,0.7138,2028,,3,3,1
+pre-commit__pre-commit-1997,0,PASS_WITH_CONCERNS,1,0,0,0,14,0.1594,1845,,3,2,
+pypa__virtualenv-2821,0,FAIL,0,0,0,1,60,0.6221,1073,,3,2,
+pytorch__ignite-1265,1,FAIL,0,1,0,0,60,0.6103,1313,,3,1,1;3

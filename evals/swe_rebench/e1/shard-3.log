@@ -1,0 +1,12 @@
+10 of 10 tasks to run · budget $6.00 · cap $1.50/task · 3 candidate(s)/task · results → evals/swe_rebench/e1/results.shard-3.csv
+✓ ModellingWebLab__cellmlmanip-268  FAIL  $0.73  862s  #1 of 3 (hidden tests accept: 1)
+✓ PennyLaneAI__pennylane-5831  PASS  $0.28  345s  #2 of 3 (hidden tests accept: 2)
+✓ agronholm__anyio-273  FAIL  $0.35  516s  #3 of 3 (hidden tests accept: 2;3)
+✗ bridgecrewio__checkov-831  PASS  $0.08  172s  FALSE PASS  #1 of 3 (hidden tests accept: none)
+✓ fabfuel__ecs-deploy-123  FAIL  $0.48  734s  #3 of 3 (hidden tests accept: 1;2;3)
+✓ jpadilla__pyjwt-847  PASS  $0.34  358s  #2 of 3 (hidden tests accept: 2)
+✗ olofk__fusesoc-724  PASS_WITH_CONCERNS  $0.37  623s  FALSE PASS  #2 of 3 (hidden tests accept: none)
+✗ pydicom__pynetdicom-516  FAIL  $1.25  2231s  #3 of 3 (hidden tests accept: none)
+✗ python-wheel-build__fromager-352  PASS  $0.09  203s  FALSE PASS  #1 of 3 (hidden tests accept: none)
+✗ smok-serwis__coolamqp-28  ERROR  $0.39  1856s  ApiTimeoutError: ApiTimeoutError(request=RequestInfo(url='https://api.tokenfactory.nebius.com/sandboxes/v1/operations/01a13be7-1ffc-774b-a498-8854674691b9', method='GET'), response=None, timeout_type='read')
+ran 10 · resolved 5 · spent $4.36

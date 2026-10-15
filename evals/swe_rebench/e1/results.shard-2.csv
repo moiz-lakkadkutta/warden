@@ -1,0 +1,11 @@
+task_id,resolved,verdict,false_pass,false_fail,unverified,theater_catch,tool_turns,usd,seconds,error,candidates,chosen,resolved_candidates
+MatterMiners__tardis-77,0,PASS_WITH_CONCERNS,1,0,0,0,57,0.5374,885,,3,1,
+PennyLaneAI__pennylane-4328,0,FAIL,0,0,0,0,60,1.2379,1326,,3,1,
+Textualize__textual-4415,0,FAIL,0,0,0,1,60,0.5231,708,,3,1,
+astropy__photutils-1956,0,FAIL,0,0,0,0,60,0.7773,706,,3,1,
+joshuadavidthomas__django-bird-58,0,FAIL,0,0,0,0,60,0.4632,1134,,3,1,
+markusressel__container-app-conf-61,0,FAIL,0,0,0,1,40,0.5069,915,,3,3,
+pydicom__pydicom-1694,0,FAIL,0,0,0,0,60,0.6120,690,,3,2,
+dask__dask-ml-659,0,PASS,1,0,0,0,41,0.1511,619,,3,1,
+python-visualization__branca-90,0,FAIL,0,0,0,1,60,0.5777,641,,3,3,
+scipp__scippnexus-166,0,FAIL,0,0,0,0,60,0.8988,1384,,3,3,

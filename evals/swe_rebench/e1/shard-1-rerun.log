@@ -1,0 +1,7 @@
+4 of 10 tasks to run · budget $3.15 · cap $1.50/task · 3 candidate(s)/task · results → evals/swe_rebench/e1/results.shard-1.csv
+✗ crate__crate-python-584  PASS  $0.41  554s  FALSE PASS  #2 of 3 (hidden tests accept: none)
+<unknown>:15: SyntaxWarning: invalid escape sequence '\ '
+✗ psf__black-3451  FAIL  $0.63  875s  #1 of 3 (hidden tests accept: none)
+✗ python-cmd2__cmd2-672  PASS  $0.10  198s  FALSE PASS  #1 of 3 (hidden tests accept: none)
+✗ scikit-learn-contrib__imbalanced-learn-1013  FAIL  $0.74  1635s  #2 of 3 (hidden tests accept: none)
+ran 4 · resolved 0 · spent $1.87

@@ -1,0 +1,11 @@
+9 of 9 tasks to run · budget $6.00 · cap $1.50/task · 3 candidate(s)/task · results → evals/swe_rebench/e1/results.shard-4.csv
+✓ NeurodataWithoutBorders__pynwb-2060  FAIL  $0.72  1229s  #1 of 3 (hidden tests accept: 1;2)
+✓ RemDelaporteMathurin__h-transport-materials-249  FAIL  $0.40  600s  #3 of 3 (hidden tests accept: 2;3)
+✗ aio-libs__yarl-959  PASS  $0.08  200s  FALSE PASS  #1 of 3 (hidden tests accept: none)
+✗ conan-io__conan-2705  FAIL  $0.61  691s  #2 of 3 (hidden tests accept: none)
+✗ frictionlessdata__frictionless-py-1142  FAIL  $0.69  922s  #1 of 3 (hidden tests accept: none)
+✗ lidatong__dataclasses-json-285  FAIL  $0.06  198s  #1 of 3 (hidden tests accept: none)
+✗ planetlabs__planet-client-python-978  FAIL  $0.67  2407s  #3 of 3 (hidden tests accept: none)
+✗ python-wheel-build__fromager-353  FAIL  $0.60  642s  #3 of 3 (hidden tests accept: none)
+✗ streamlink__streamlink-6381  FAIL  $0.67  1835s  #2 of 3 (hidden tests accept: none)
+ran 9 · resolved 2 · spent $4.51

@@ -1,0 +1,3 @@
+1 of 10 tasks to run · budget $1.50 · cap $1.50/task · 3 candidate(s)/task · results → evals/swe_rebench/e1/results.shard-3.csv
+✓ smok-serwis__coolamqp-28  FAIL  $0.39  11589s  #1 of 3 (hidden tests accept: 1;2;3)
+ran 1 · resolved 1 · spent $0.39

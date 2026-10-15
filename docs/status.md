@@ -286,6 +286,57 @@ on `2e7bfa9`, on the three pilot-3 failure shapes. Results: `evals/swe_rebench/s
   under-specified-issue misses, not a check that failed to fire.
 - **Spend: $0.36.**
 
+### 1j. E1 (2026-10-14/15): 50 tasks, 11/49 resolved, 4/14 PASS precision, $26.41
+
+`warden eval --out evals/swe_rebench/e1 --shard i/5 --candidates 3 --max-usd 1.5`, 60 tool turns.
+Rows: `evals/swe_rebench/e1/results.shard-*.csv`; logs `shard-*.log` (first pass) and
+`shard-*-rerun.log`. `pypa__pip-11987` excluded (base cannot be graded).
+
+| metric | E1 |
+|---|---|
+| Resolved | 11/49 (22%, 95% CI 13–36%) |
+| PASS precision | 4 of 14 (29%); 10 false PASS |
+| False FAIL | 6 of 35 FAIL |
+| Theater catches | 14 |
+| Errors | 0 after re-run (7 in the first pass) |
+| Cost | $0.54/task, $26.41 ($23.39 first pass + $3.02 re-run; FAIL avg $0.65, PASS avg $0.26) |
+| Median wall-clock | 14 min 21 s (coolamqp re-run: 3 h 13 min, $0.39) |
+
+**Two code versions.** The first pass (38 tasks graded) ran on `2e7bfa9`, before the theater retry
+(`4796965`) and transport retry (`5077c58`). Its 7 ERROR rows (`ApiTimeoutError` /
+`ContreeTransportError` polling `GET /sandboxes/v1/operations/{id}`) and 4 tasks that two shards
+had no budget left for were re-run on `05c5fe3` (originals in
+`evals/swe_rebench/attempts/e1-first-pass/`). Tavily hit its plan quota during the re-run: 7 of
+the 11 re-run tasks planned without web search (21 `tavily.search` errors). Top up or swap the
+key before the demo.
+
+**Best-of-N.** Candidate 1 alone passes the hidden tests on 7 tasks; the chosen candidate on 11.
+Rescues (candidate 1 not resolved, chosen one is): pennylane-5831, anyio-273, pyjwt-847,
+h-transport-materials. One wrong pick: gmr__pamqp-52, candidate 2 resolves but #3 (FAIL) was
+chosen; the oracle is 12/49. ignite-1265 picked #1 with #1 and #3 both resolving.
+
+**False PASS triage** (issue vs Warden's diff vs `test_patch` / hidden-test failures):
+8 under-specified, 2 verifier misses.
+- Verifier misses: **pre-commit-1997**: the issue's traceback shows `pre_commit.util.CalledProcessError`;
+  the fix catches and the repro mocks `subprocess.CalledProcessError`. **checkov-831**: the issue
+  asks for workloads (`kind: Deployment`); every Warden test uses `kind: Pod`, and the test for the
+  issue's own scenario was a guard (passes on base). Spec review marked both "met".
+- Under-specified: spikeinterface-2775 (new `new_unit_ids` kwarg), crate-python-584 (a `UserWarning`
+  text), cmd2-672 (usage on stderr before the error; borderline), tardis-77 (`tardis_machine_name`
+  tag), dask-ml-659 (tokenizer registered on `import dask_ml`; borderline), fusesoc-724 (log typo
+  fixed upstream; network test), fromager-352 (new `build_tag` arg), yarl-959 (hidden test rejects
+  what the issue asks for).
+- 6 of 10 were candidate 1 passing and stopping early ($0.08–$0.54).
+
+**Next verifier fixes (from the 2 misses):** spec review should require the evidence test to use
+the issue's concrete artefact (exception class from the traceback, YAML `kind`, command line);
+when the test mapped to the issue's main behaviour passes on base, PASS → PASS_WITH_CONCERNS
+or a theater retry.
+
+**Guards and tools (59 E1 run dirs):** `replace_in_file` 190 calls vs `write_file` 205; shrink guard
+refused 6 writes, `allow_shrink=true` used 5 times; finish nudge (`green_turn`) 25; theater
+retry 2 (dask-ml FAIL → PASS, a false PASS; ignite stayed FAIL).
+
 ### 1a. Earlier notes: blocked by Token Factory billing (resolved)
 
 `warden run --issue 196 --at 43f3851^ --yes` (run `20261010-111217-7c89`) fetched the issue, then

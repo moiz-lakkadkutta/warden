@@ -1,0 +1,11 @@
+task_id,resolved,verdict,false_pass,false_fail,unverified,theater_catch,tool_turns,usd,seconds,error,candidates,chosen,resolved_candidates
+Materials-Consortia__optimade-python-tools-670,0,FAIL,0,0,0,1,60,0.6549,1216,,3,1,
+Ouranosinc__xclim-413,0,FAIL,0,0,0,0,60,0.7563,818,,3,1,
+SpikeInterface__spikeinterface-2775,0,PASS,1,0,0,0,29,0.3698,873,,3,2,
+asottile__setup-cfg-fmt-41,1,PASS,0,0,0,0,48,0.5751,542,,3,3,1;2;3
+iossifovlab__gpf-446,0,FAIL,0,0,0,1,60,0.8386,1918,,3,1,
+locustio__locust-2663,0,FAIL,0,0,0,0,60,0.6990,1012,,3,1,
+crate__crate-python-584,0,PASS,1,0,0,0,51,0.4101,554,,3,2,
+psf__black-3451,0,FAIL,0,0,0,0,60,0.6255,875,,3,1,
+python-cmd2__cmd2-672,0,PASS,1,0,0,0,31,0.1011,198,,3,1,
+scikit-learn-contrib__imbalanced-learn-1013,0,FAIL,0,0,0,1,60,0.7373,1635,,3,2,

@@ -1,0 +1,10 @@
+task_id,resolved,verdict,false_pass,false_fail,unverified,theater_catch,tool_turns,usd,seconds,error,candidates,chosen,resolved_candidates
+NeurodataWithoutBorders__pynwb-2060,1,FAIL,0,1,0,0,60,0.7247,1229,,3,1,1;2
+RemDelaporteMathurin__h-transport-materials-249,1,FAIL,0,1,0,1,32,0.3998,600,,3,3,2;3
+aio-libs__yarl-959,0,PASS,1,0,0,0,21,0.0836,200,,3,1,
+conan-io__conan-2705,0,FAIL,0,0,0,0,60,0.6141,691,,3,2,
+frictionlessdata__frictionless-py-1142,0,FAIL,0,0,0,1,60,0.6897,922,,3,1,
+lidatong__dataclasses-json-285,0,FAIL,0,0,0,1,11,0.0599,198,,3,1,
+planetlabs__planet-client-python-978,0,FAIL,0,0,0,1,60,0.6693,2407,,3,3,
+python-wheel-build__fromager-353,0,FAIL,0,0,0,1,60,0.6019,642,,3,3,
+streamlink__streamlink-6381,0,FAIL,0,0,0,1,60,0.6708,1835,,3,2,

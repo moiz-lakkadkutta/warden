@@ -1,0 +1,5 @@
+3 of 10 tasks to run · budget $2.60 · cap $1.50/task · 3 candidate(s)/task · results → evals/swe_rebench/e1/results.shard-0.csv
+✗ pre-commit__pre-commit-1997  PASS_WITH_CONCERNS  $0.16  1845s  FALSE PASS  #2 of 3 (hidden tests accept: none)
+✗ pypa__virtualenv-2821  FAIL  $0.62  1073s  #2 of 3 (hidden tests accept: none)
+✓ pytorch__ignite-1265  FAIL  $0.61  1313s  #1 of 3 (hidden tests accept: 1;3)
+ran 3 · resolved 1 · spent $1.39

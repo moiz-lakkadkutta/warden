@@ -1,0 +1,5 @@
+3 of 10 tasks to run · budget $2.60 · cap $1.50/task · 3 candidate(s)/task · results → evals/swe_rebench/e1/results.shard-2.csv
+✗ dask__dask-ml-659  PASS  $0.15  619s  FALSE PASS  #1 of 3 (hidden tests accept: none)
+✗ python-visualization__branca-90  FAIL  $0.58  641s  #3 of 3 (hidden tests accept: none)
+✗ scipp__scippnexus-166  FAIL  $0.90  1384s  #3 of 3 (hidden tests accept: none)
+ran 3 · resolved 0 · spent $1.63

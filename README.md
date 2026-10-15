@@ -85,32 +85,47 @@ winner won; the PR evidence table says "chosen from N candidates"; every event c
 
 ## Results
 
-SWE-rebench pilots, the same 10 tasks (`warden eval --n 10 --seed 7`, $1/task cap, 40 tool
-turns; pilot 3's last two tasks ran at $0.40 to stay inside its budget). Every row is in [`evals/swe_rebench/results.csv`](evals/swe_rebench/results.csv) (pilot 2)
-and [`evals/swe_rebench/pilot-3/results.csv`](evals/swe_rebench/pilot-3/results.csv) (pilot 3); the
-task ids are in [`task_ids.txt`](evals/swe_rebench/task_ids.txt). "Resolved" means the dataset's
-hidden tests pass, and Warden never sees those tests.
+E1: 50 SWE-rebench tasks (`warden eval --n 50`, sample in
+[`evals/swe_rebench/e1/task_ids.txt`](evals/swe_rebench/e1/task_ids.txt); one base cannot be graded and is
+excluded), run as 5 shards with 3 candidates per task, a $1.50 per-task cap and 60 tool turns.
+Every row is in [`evals/swe_rebench/e1/`](evals/swe_rebench/e1/). "Resolved" means the dataset's
+hidden tests pass, and Warden never sees those tests. Regenerate the table with
+`warden report evals/swe_rebench/e1/results.shard-*.csv --md --label E1 --write-readme`.
 
 <!-- results:start -->
-| metric | pilot 2 | pilot 3 (+ regression check, spec review) |
-|---|---|---|
-| Resolved | **4 / 10** | **1 / 10** |
-| Verifier PASS that hidden tests reject (false PASS) | 3 of 5 PASS | 1 of 1 PASS |
-| Verifier FAIL on a fix hidden tests accept (false FAIL) | 1 of 5 FAIL (ran out of turns before writing a test) | 1 of 8 FAIL (ran out of turns; no test) |
-| Unverified (FAIL only because the suite timed out) | 1 | 0 |
-| Harness error | 0 | 1 (Sandboxes API 500; retry added) |
-| Theater catches (new test already passes on the unfixed base) | 1 | 0 |
-| Cost | **$0.13 / task**, $1.33 total | **$0.18 / task**, $1.78 total |
+| metric | E1 |
+|---|---|
+| Resolved | **11 / 49** (22%, 95% CI 13–36%) |
+| Verifier PASS precision (PASS the hidden tests accept) | 4 of 14 PASS (29%) |
+| Verifier PASS that hidden tests reject (false PASS) | 10 of 14 PASS |
+| Verifier FAIL on a fix hidden tests accept (false FAIL) | 6 of 35 FAIL |
+| Unverified (FAIL only because the suite timed out) | 1 |
+| Theater catches (new test already passes on the unfixed base) | 14 |
+| Errors (run did not reach a verdict) | 0 |
+| Cost | **$0.54 / task**, $26.41 total |
+| Median wall-clock per task | 14 min 21 s |
+| Mean tool turns (runs that reached a verdict) | 47.7 |
+| Excluded (base cannot be graded; see excluded.txt) | 1 |
 <!-- results:end -->
 
-What pilot 3 shows about the new checks: the regression check stopped one false PASS (planet: the
-fix broke catalog requests, and the hidden tests fail there too). It missed one: on spikeinterface
-it did not select the module's own test file, so it never ran. On pamqp it flagged tests the
-upstream fix changes on purpose. The resolved count fell from 4 to 1, and that is not the
-verifier, because hidden tests grade the fix. The implementer code was unchanged, and Super's tool
-use varied run to run (one clobbered a 19 kB file with a 309-byte fragment; 7 of 10 runs used all
-40 turns). The same task resolves in some runs and not in others. At 10 tasks and one run each,
-these numbers are a pilot, not a benchmark; details in `docs/status.md` §1e.
+What E1 shows:
+
+- **Best-of-N earns its cost.** Candidate 1 alone passes the hidden tests on 7 tasks; picking
+  among three resolves 11. On one task (pamqp) a candidate that passes the hidden tests was
+  ranked below a FAIL, so a better ranker would reach 12.
+- **False PASSes are mostly the benchmark, not the verifier.** Of the 10, 8 need an API, message
+  or naming choice that the issue never states (yarl's hidden test even rejects what the issue
+  asks for). 2 are verifier misses: the repro used a different exception class (pre-commit) or
+  resource kind (checkov) than the issue's own example, so it "reproduced" something else. Six of
+  the 10 were candidate 1 passing and stopping early, at $0.08–$0.54.
+- **Theater catches:** 14 new tests already passed on the unfixed base and were not counted as
+  evidence.
+- **No harness errors** after the transport retry; the first pass lost 7 of 49 tasks to
+  Sandboxes poll timeouts, which were re-run (`docs/status.md` §1j).
+
+Earlier 10-task pilots (4/10 and 1/10 resolved at $0.13–$0.18 per task, one candidate) are in
+[`evals/swe_rebench/results.csv`](evals/swe_rebench/results.csv) and
+[`evals/swe_rebench/pilot-3/`](evals/swe_rebench/pilot-3/results.csv), with notes in `docs/status.md` §1d–1e.
 
 ## How it works
 
@@ -197,7 +212,7 @@ if you want CI on them.
   overwriting a 19 kB file with a fragment. Write guards and `replace_in_file` target that.
   Results at n = 10–50 come with confidence intervals, and single-task anecdotes are not results.
 - **Best-of-N trades cost for rescues.** Three candidates raise the cost per task (pilot 2:
-  $0.13; E1 with N = 3: about $0.52). Early stop means a false PASS on candidate 1 is never
+  $0.13; E1 with N = 3: $0.54). Early stop means a false PASS on candidate 1 is never
   challenged by candidates 2 and 3, so best-of-N rescues FAILs, not false PASSes.
 - **Sandboxes beta transport errors.** 7 of 49 E1 tasks first ended in an error on a timed-out or
   dropped `GET /operations/{id}` poll. Runs are now retried on those, and the affected tasks were

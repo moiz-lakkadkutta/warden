@@ -1,0 +1,10 @@
+10 of 10 tasks to run · budget $6.00 · cap $1.50/task · 3 candidate(s)/task · results → evals/swe_rebench/e1/results.shard-2.csv
+✗ MatterMiners__tardis-77  PASS_WITH_CONCERNS  $0.54  885s  FALSE PASS  #1 of 3 (hidden tests accept: none)
+✗ PennyLaneAI__pennylane-4328  FAIL  $1.24  1326s  #1 of 3 (hidden tests accept: none)
+✗ Textualize__textual-4415  FAIL  $0.52  708s  #1 of 3 (hidden tests accept: none)
+✗ astropy__photutils-1956  FAIL  $0.78  706s  #1 of 3 (hidden tests accept: none)
+✗ dask__dask-ml-659  ERROR  $0.19  387s  ContreeTransportError: ContreeTransportError(request=RequestInfo(url='https://api.tokenfactory.nebius.com/sandboxes/v1/operations/01a13b0e-ffb9-7675-b1e7-53250ed4152d', method='GET'), response=None, error='', _raw=ReadError
+✗ joshuadavidthomas__django-bird-58  FAIL  $0.46  1134s  #1 of 3 (hidden tests accept: none)
+✗ markusressel__container-app-conf-61  FAIL  $0.51  915s  #3 of 3 (hidden tests accept: none)
+✗ pydicom__pydicom-1694  FAIL  $0.61  690s  #2 of 3 (hidden tests accept: none)
+ran 8 · resolved 0 · spent $4.85

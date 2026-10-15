@@ -1,0 +1,12 @@
+10 of 10 tasks to run · budget $6.00 · cap $1.50/task · 3 candidate(s)/task · results → evals/swe_rebench/e1/results.shard-0.csv
+✗ IAMconsortium__nomenclature-431  FAIL  $0.37  886s  #3 of 3 (hidden tests accept: none)
+✗ OSOceanAcoustics__echopype-428  FAIL  $0.62  839s  #1 of 3 (hidden tests accept: none)
+✗ SciCatProject__scitacean-148  FAIL  $0.52  504s  #1 of 3 (hidden tests accept: none)
+✓ andialbrecht__sqlparse-231  PASS  $0.12  184s  #1 of 3 (hidden tests accept: 1)
+✗ coverahealth__dataspec-30  FAIL  $0.86  878s  #2 of 3 (hidden tests accept: none)
+✗ gmr__pamqp-52  FAIL  $0.88  861s  #3 of 3 (hidden tests accept: 2)
+✗ lightstep__lightstep-tracer-python-106  FAIL  $0.71  2028s  #3 of 3 (hidden tests accept: 1)
+✗ pre-commit__pre-commit-1997  ERROR  $0.20  1728s  ApiTimeoutError: ApiTimeoutError(request=RequestInfo(url='https://api.tokenfactory.nebius.com/sandboxes/v1/operations/01a13be5-4c49-704e-93d8-093f6b18e002', method='GET'), response=None, timeout_type='read')
+✗ pypa__virtualenv-2821  ERROR  $0.20  1145s  ApiTimeoutError: ApiTimeoutError(request=RequestInfo(url='https://api.tokenfactory.nebius.com/sandboxes/v1/operations/01a13c24-ec21-7314-b249-5f21fb00d58b', method='GET'), response=None, timeout_type='read')
+✗ pytorch__ignite-1265  ERROR  $0.11  299s  ContreeTransportError: ContreeTransportError(request=RequestInfo(url='https://api.tokenfactory.nebius.com/sandboxes/v1/operations/01a13c34-0bc6-71a9-ade3-df8b2c9c3709', method='GET'), response=None, error='', _raw=ReadError
+ran 10 · resolved 1 · spent $4.61
