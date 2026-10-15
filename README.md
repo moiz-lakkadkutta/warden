@@ -162,13 +162,24 @@ commit before the human fix from the issue text alone. Per-issue rows, notes and
 
 | found | confirmed | PASS | PASS_WITH_CONCERNS | FAIL | PENDING-HUMAN | PRs | USD |
 |---|---|---|---|---|---|---|---|
-| 9 | 2 | **1** | 0 | 8 | 7 of 9 | 1 ([#226](https://github.com/moiz-lakkadkutta/Fabric-Inventory/pull/226), Fabric CI 7/7 green) | **$4.81** (15 attempts) |
+| 9 | 3 | **1** | 0 | 8 | 8 of 9 | 1 ([#226](https://github.com/moiz-lakkadkutta/Fabric-Inventory/pull/226), Fabric CI 7/7 green) | **$7.29** (27 attempts) |
 
-Not yet useful as an autonomous fixer on this codebase: 1 of 9. The pipeline was not the
-bottleneck. In 13 of 15 attempts the implementer (Nemotron 3 Super) never called `finish`: it
-looped on Fabric's 900-line test files, re-reading them or re-sending them whole past the
-completion limit. A 60-turn, best-of-2 retry fixed none of the five it retried. The safety side
-held:
+Not yet useful as an autonomous fixer on this codebase: 1 of 9. In the first 15 attempts the
+implementer (Nemotron 3 Super) never called `finish` in 13. It looped on Fabric's 900-line test
+files, re-reading them or re-sending them whole past the 8192-token completion limit. A 60-turn,
+best-of-2 retry fixed none of the five it retried.
+
+Warden then changed the implementer's tools (`docs/status.md` §1l):
+- 200-line read pages;
+- no whole-file rewrite of a file over 300 lines;
+- a 16k completion budget;
+- "edit mode", which withholds the read tools when the model loops;
+- auto-finish of a checked green candidate.
+
+The six #212 issues were re-run twice (`camp-replay-212-c`, `-d`). With edit mode, 5 of 6
+candidates edited source code (1 before), cached re-reads fell from 71 to 32, and 2 repros were
+valid (1 before). PASS stayed at 0 of 6 in both re-runs: the remaining failures are wrong repros,
+suite regressions and lint, not the loop. The safety side held:
 - No FAIL produced a branch or a PR.
 - The theater check rejected eight new tests that failed for the wrong reason.
 - The spec review caught a candidate that was green on suite, mypy and ruff but implemented 1 of

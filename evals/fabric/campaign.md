@@ -16,9 +16,11 @@ waves by the files their plans touch, each wave's passing fixes are merged with
 | `camp-head-2` @ head | 1 | 0 | 0 | 0 | 1 | 0 | 0 | 0 | $0.40 |
 | `camp-replay-212` @ `43f3851^` | 6 | 1 | 1 | 0 | 5 | 6 | 1 | 1 | $1.11 |
 | `camp-replay-212-b` @ `43f3851^` | 5 | 0 | 0 | 0 | 5 | 4 | 0 | 0 | $2.21 |
+| `camp-replay-212-c` @ `43f3851^` | 6 | 0 | 0 | 0 | 6 | 6 | 0 | 0 | $1.14 |
+| `camp-replay-212-d` @ `43f3851^` | 6 | 2 | 0 | 0 | 6 | 6 | 0 | 0 | $1.35 |
 | `camp-replay-215` @ `60ae34b^` | 1 | 1 | 0 | 0 | 1 | 1 | 0 | 0 | $0.41 |
 | `camp-replay-216` @ `3eee35f^` | 1 | 0 | 0 | 0 | 1 | 1 | 0 | 0 | $0.42 |
-| **final** (best attempt per issue) | 9 | 2 | 1 | 0 | 8 | 7 | 1 | 1 | $4.81 |
+| **final** (best attempt per issue) | 9 | 3 | 1 | 0 | 8 | 8 | 1 | 1 | $7.29 |
 
 found = issues attempted · confirmed = a new test failed on the unfixed code (theater check) · FAIL includes ERROR · merged = merged cleanly into the wave's integration image · final USD = every attempt's spend
 
@@ -39,6 +41,18 @@ found = issues attempted · confirmed = a new test failed on the unfixed code (t
 | #205 [P1] Delete guards missing for BOM/Design/Operation-Master (only Routi | backlog | `43f3851^` | FAIL | n | y: schema, money | 1 | — | — | 0.56 | 32 | `camp-replay-212-b-205` | implementer did not finish (budget or blocked); theater: invalid repro — test_mo_deletion_cascade.py::test_delete_mo_cascades_to_bom_lines: invalid: fails on ba |
 | #206 [P1] Delivery challan can over-dispatch its SO (250%) and can be issue | backlog | `43f3851^` | FAIL | n | y: money, schema | 1 | — | — | 0.58 | 33 | `camp-replay-212-b-206` | implementer did not finish (budget or blocked); theater: invalid repro — test_dc_service.py::test_dc_issue_caps_cumulative_dispatch_at_ordered_qty: invalid: fai |
 | #207 [P1] Numeric overflow → 500 UNKNOWN (invoice line product, receipt amo | backlog | `43f3851^` | FAIL | n | n | 2 | — | — | 0.09 | 25 | `camp-replay-212-b-207` | no new tests were added; spec: 3 of 4 stated behaviours not implemented (Invoice line with qty and price each within ≤1E+9 cap but whose derived product overflo |
+| #196 [P1] Dashboard sales/GST KPIs count DRAFT invoices (revenue & GST-coll | backlog | `43f3851^` | FAIL | n | y: money | 1 | — | — | 0.13 | 14 | `camp-replay-212-c-196` | implementer did not finish (budget or blocked); no new tests were added |
+| #197 [P1] AR ageing wrong: backdated as_of deducts future receipts + bucket | backlog | `43f3851^` | FAIL | n | y: money, schema | 1 | — | — | 0.17 | 16 | `camp-replay-212-c-197` | implementer did not finish (budget or blocked); full suite not green ({'failed': 2, 'passed': 1504}) |
+| #200 [P1] No 3-way match: unbounded over-receipt, PO closes off DRAFT GRN,  | backlog | `43f3851^` | FAIL | n | y: money, schema | 2 | — | — | 0.15 | 13 | `camp-replay-212-c-200` | implementer did not finish (budget or blocked); no new tests were added |
+| #205 [P1] Delete guards missing for BOM/Design/Operation-Master (only Routi | backlog | `43f3851^` | FAIL | n | y: schema | 1 | — | — | 0.33 | 16 | `camp-replay-212-c-205` | implementer did not finish (budget or blocked); theater: invalid repro — test_manufacturing.py::test_delete_bom_referenced_by_active_mo_returns_409: invalid: fa |
+| #206 [P1] Delivery challan can over-dispatch its SO (250%) and can be issue | backlog | `43f3851^` | FAIL | n | y: money, schema | 2 | — | — | 0.15 | 13 | `camp-replay-212-c-206` | implementer did not finish (budget or blocked); no new tests were added |
+| #207 [P1] Numeric overflow → 500 UNKNOWN (invoice line product, receipt amo | backlog | `43f3851^` | FAIL | n | y: money, schema, security | 1 | — | — | 0.20 | 14 | `camp-replay-212-c-207` | implementer did not finish (budget or blocked); no new tests were added |
+| #196 [P1] Dashboard sales/GST KPIs count DRAFT invoices (revenue & GST-coll | backlog | `43f3851^` | FAIL | y | y: money, tax | 1 | — | — | 0.19 | 16 | `camp-replay-212-d-196` | full suite not green ({'failed': 2, 'passed': 1505}); mypy red |
+| #197 [P1] AR ageing wrong: backdated as_of deducts future receipts + bucket | backlog | `43f3851^` | FAIL | n | y: money, schema | 1 | — | — | 0.23 | 17 | `camp-replay-212-d-197` | implementer did not finish (budget or blocked); theater: invalid repro — test_reports_ageing.py::test_ageing_backdated_as_of_excludes_future_receipts: invalid:  |
+| #200 [P1] No 3-way match: unbounded over-receipt, PO closes off DRAFT GRN,  | backlog | `43f3851^` | FAIL | n | y: money, schema | 1 | — | — | 0.23 | 16 | `camp-replay-212-d-200` | implementer did not finish (budget or blocked); theater: invalid repro — test_grn_service.py::test_create_grn_rejects_cross_po_line_id: invalid: fails on base ( |
+| #205 [P1] Delete guards missing for BOM/Design/Operation-Master (only Routi | backlog | `43f3851^` | FAIL | n | y: schema, money | 1 | — | — | 0.24 | 5 | `camp-replay-212-d-205` | implementer did not finish (budget or blocked); theater: invalid repro — test_manufacturing_cascade_delete.py: invalid: collection error on base; still red with |
+| #206 [P1] Delivery challan can over-dispatch its SO (250%) and can be issue | backlog | `43f3851^` | FAIL | y | y: money, schema | 2 | — | — | 0.24 | 16 | `camp-replay-212-d-206` | implementer did not finish (budget or blocked); full suite not green ({'failed': 2, 'passed': 1506}) |
+| #207 [P1] Numeric overflow → 500 UNKNOWN (invoice line product, receipt amo | backlog | `43f3851^` | FAIL | n | y: money, schema | 3 | — | — | 0.22 | 5 | `camp-replay-212-d-207` | implementer did not finish (budget or blocked); theater: invalid repro — test_error_handler.py::test_numeric_overflow_maps_to_422: invalid: fixture/setup error  |
 | #215 [P3] Registered buyer whose GSTIN prefix isn't a state code (99/00) si | backlog | `60ae34b^` | FAIL | y | y: schema, security, money | 1 | — | — | 0.41 | 34 | `camp-replay-215-215` | implementer did not finish (budget or blocked); mypy red |
 | #216 [P2] Credit notes need their own series + a credit-note document (Rule | backlog | `3eee35f^` | FAIL | n | y: money, schema, tax | 1 | — | — | 0.42 | 23 | `camp-replay-216-216` | implementer did not finish (budget or blocked); theater: invalid repro — test_credit_note.py: invalid: collection error on base; still red with the fix |
 
@@ -55,6 +69,11 @@ found = issues attempted · confirmed = a new test failed on the unfixed code (t
 | `camp-replay-216` | `3eee35f^` | 1 | #216 | — | #216: no candidate to merge (FAIL or error) | `bdcd4d2e` | not run (nothing merged) |
 | `camp-head-2` | head | 1 | #210 | — | #210: no candidate to merge (FAIL or error) | `5ce34368` | not run (nothing merged) |
 | `camp-replay-215` | `60ae34b^` | 1 | #215 | — | #215: no candidate to merge (FAIL or error) | `848b7d44` | not run (nothing merged) |
+| `camp-replay-212-c` | `43f3851^` | 1 | #196 #197 #205 #207 | — | #196: no candidate to merge (FAIL or error); #197: no candidate to merge (FAIL or error); #205: no candidate to merge (FAIL or error); #207: no candidate to merge (FAIL or error) | `38ed836d` | not run (nothing merged) |
+| `camp-replay-212-c` | `43f3851^` | 2 | #200 #206 | — | #200: no candidate to merge (FAIL or error); #206: no candidate to merge (FAIL or error) | `38ed836d` | not run (nothing merged) |
+| `camp-replay-212-d` | `43f3851^` | 1 | #196 #197 #200 #205 | — | #196: no candidate to merge (FAIL or error); #197: no candidate to merge (FAIL or error); #200: no candidate to merge (FAIL or error); #205: no candidate to merge (FAIL or error) | `4746b2d1` | not run (nothing merged) |
+| `camp-replay-212-d` | `43f3851^` | 2 | #206 | — | #206: no candidate to merge (FAIL or error) | `4746b2d1` | not run (nothing merged) |
+| `camp-replay-212-d` | `43f3851^` | 3 | #207 | — | #207: no candidate to merge (FAIL or error) | `4746b2d1` | not run (nothing merged) |
 <!-- campaign:end -->
 
 ## Notes (2026-10-15, written by hand; the tables above are generated)
@@ -145,3 +164,43 @@ was **$4.81** for 15 attempts on 9 issues (mean $0.32 per attempt), with a per-i
   that *fails* on the unfixed code, and a coverage test for correct behaviour passes there.
 - Wall clock: about 15 min per issue in config A and about 30 min in B. Up to 4 issues ran in
   parallel (`WARDEN_MAX_FORKS=4`). The Fabric gate alone takes about 18 min at head.
+
+## Re-run after the implementer fixes: `camp-replay-212-c` and `-d` (2026-10-15, by hand)
+
+The same six #212 issues at `43f3851^` in config A (40 turns, 1 candidate), cap $0.80/issue,
+after the B3 implementer changes (docs/status.md §1l). `-c` ran with the first three changes: 200-line
+read pages, the large-file write refusal and auto-finish. `-d` also ran with edit mode, which
+withholds the read tools after an escalated re-read or a second idle nudge.
+
+| metric (6 issues, from events.jsonl) | `camp-replay-212` (before) | `-c` | `-d` |
+|---|---|---|---|
+| PASS | **1** (#196) | 0 | 0 |
+| valid repro (theater) | 1 | 0 | **2** (#196, #206) |
+| `finish` called / auto-finished | 1 / — | 0 / 0 | 1 / 0 |
+| runs that edited a source file | 1 | 0 | **5** |
+| `replace_in_file` calls / `write_file` | 3 / 4 | 0 / 2 | **26** / 7 |
+| cached re-read answers | 71 | 87 | **32** |
+| replies cut at 8192 tokens | 2 | 0 | 0 |
+| tool turns (sum) | 226 | 240 | 238 |
+| USD | $1.11 | $1.14 | $1.35 |
+
+- **The loop is broken. The fix rate did not move.** In `-d` five of six candidates edited
+  source code, and every one added tests. Before, one did. Edit mode fired 12 times, and a
+  read sent anyway was refused instead of served. Two repros were valid, against one before.
+  No candidate PASSed:
+  - #196 called `finish` itself with a correct repro and 1 of 1 stated behaviour implemented, but
+    left 2 suite failures and mypy red.
+  - #206 had a valid repro and green new tests. Auto-finish declined it twice (a `ruff` error
+    that autofix can't fix), and it left 2 suite failures.
+  - #197, #200, #205 and #207 wrote repros that fail for the wrong reason (TypeError,
+    ImportError, collection error) or stay red with the fix.
+- **Auto-finish never fired, and declined 5 times, correctly each time**: the new tests were red
+  (#200, #207), did not collect (#205), or lint was red (#206 ×2). It is a no-op on these
+  issues, not a false PASS source.
+- **`-c` alone was worse than before.** Without edit mode the STOP note did not change Super's
+  behaviour: 16 cached answers for a 50-line test file on #196, 23 on #207, no source edit
+  in any run. #196 PASSed in `camp-replay-212` and FAILed in `-c` and `-d`. One sample per issue
+  is noise-dominated (see SWE-rebench pilots 1–3).
+- **The large-file write refusal fired 3 times** (write_file on an existing >300-line file).
+  No reply hit the 8192 cap in `-c` or `-d`: the implementer now sends max_tokens=16384.
+- No PR was opened: a FAIL opens nothing.
