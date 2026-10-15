@@ -167,6 +167,7 @@ class SandboxProber:
             keep=False,
             files={self.probe_path: probe_py().encode()},
         )
+        self.log.artifact("idor_probe_raw.txt", res.stdout[-20000:])
         run = parse_probe_output(res.stdout)
         if run.error:
             self.log.emit(
@@ -174,5 +175,17 @@ class SandboxProber:
                 "note",
                 {"probe_error": run.error, "exit_code": res.exit_code,
                  "stderr_tail": res.stderr[-500:]},
+            )  # fmt: skip
+        else:
+            # Persist the full observation set as evidence: which probes reached a guard (422),
+            # which leaked (vulnerable), which were inconclusive.
+            self.log.emit(
+                "hunt",
+                "note",
+                {"observations": [
+                    {"probe": o.probe, "status": o.status, "vulnerable": o.vulnerable,
+                     "actual": o.actual, "request_id": o.request_id}
+                    for o in run.observations
+                ]},
             )  # fmt: skip
         return run

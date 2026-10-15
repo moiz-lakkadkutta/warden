@@ -46,6 +46,7 @@ set -e
 cd /app
 export ENVIRONMENT=dev
 export DATABASE_URL="{db_url}"
+export JWT_SECRET="warden-dev-probe-secret-0123456789abcdef"
 export SIGNUP_RATE_LIMIT_MAX_REQUESTS=1000
 export MFA_REQUIRED_FOR_ADMIN=false
 uvicorn main:app --host 127.0.0.1 --port {port} >/tmp/warden_uvicorn.log 2>&1 &
@@ -108,6 +109,9 @@ def req(method, path, token=None, body=None):
     r.add_header("Content-Type", "application/json")
     if token:
         r.add_header("Authorization", "Bearer " + token)
+    if method == "POST":
+        # Fabric's idempotency middleware returns 400 on a mutating POST with no key.
+        r.add_header("Idempotency-Key", str(uuid.uuid4()))
     try:
         resp = urllib.request.urlopen(r, timeout=30)
         raw = resp.read()
@@ -142,7 +146,7 @@ def body_text(body):
 
 def signup(tag):
     body = {
-        "email": "warden-%s-%s@probe.local" % (tag, uuid.uuid4().hex[:8]),
+        "email": "warden-%s-%s@example.com" % (tag, uuid.uuid4().hex[:8]),
         "password": PW,
         "org_name": "Warden Probe %s %s" % (tag, uuid.uuid4().hex[:6]),
         "firm_name": "Firm %s" % tag,
@@ -269,7 +273,7 @@ def main():
     get_by_id = [p for p in paths if "{" in p and "get" in paths[p]]
 
     # ---- cross-org read: create in B, read by id with A's token ----
-    for coll, tmpl in (("parties", "/parties/{id}"), ("items", "/items/{id}")):
+    for coll, singular, idkey in (("parties", "party", "party_id"), ("items", "item", "item_id")):
         make = {"code": "BONLY-" + uuid.uuid4().hex[:6], "name": "b-only"}
         if coll == "parties":
             make["is_customer"] = True
@@ -279,12 +283,12 @@ def main():
         cst, cdata, _ = req("POST", "/" + coll, token=b_tok, body=make)
         rid = None
         if isinstance(cdata, dict):
-            rid = cdata.get("id") or cdata.get(coll[:-1] + "_id")
+            rid = cdata.get("id") or cdata.get(idkey)
         if cst in (200, 201) and rid:
             gst, gdata, gh = req("GET", "/%s/%s" % (coll, rid), token=a_tok)
             leaked = gst == 200
             add("cross_org_read", "GET", "/%s/{id}" % coll, gst, gh, gdata, leaked,
-                "404/422 - org A must not read org B's %s by id" % coll[:-1],
+                "404/422 - org A must not read org B's %s by id" % singular,
                 ("200 LEAKED org B's row to org A" if leaked else "HTTP %s (isolation holds)" % gst),
                 read_repro("/%s/{id}" % coll, coll))
 
@@ -318,11 +322,9 @@ def main():
             actual = "422 request validation (could not reach the firm guard with a synthetic body)"
         else:
             actual = "HTTP %s" % st
-        # Record the interesting cases: a live hole (vuln) or a confirmed guard on the known class.
-        if vuln or guard:
-            add("cross_firm_write", "POST", path, st, hh, data, vuln,
-                "422 - a body firm_id outside the caller's org must be rejected",
-                actual, write_repro("POST", path, body))
+        add("cross_firm_write", "POST", path, st, hh, data, vuln,
+            "422 - a body firm_id outside the caller's org must be rejected",
+            actual, write_repro("POST", path, body))
 
     print(MARKER)
     print(json.dumps({
@@ -330,6 +332,7 @@ def main():
         "endpoints_enumerated": len(get_by_id),
         "tenants": 2,
         "error": "",
+        "debug": {"firm_id_posts_swept": swept, "total_paths": len(paths)},
     }))
     print(MARKER)
 
