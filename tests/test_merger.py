@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -33,6 +34,10 @@ class GitFake(FakeBackend):
         self.conflicts: dict[int, list[str]] = {}
         self.bad_patch: set[int] = set()
         self.merges: list[tuple[int, str, str]] = []  # (issue, wave base, integration parent)
+
+    def use(self, ref: str) -> Any:
+        """A uuid of an image this backend made opens that image (as Contree does)."""
+        return self.images[ref] if ref in self.images else super().use(ref)
 
     def _interpret(self, img: FakeImage, shell: str, cwd: str) -> tuple[str, str, int]:
         head = img.files.get("/git/HEAD", b"base0").decode()

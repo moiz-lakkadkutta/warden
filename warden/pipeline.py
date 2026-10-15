@@ -106,6 +106,11 @@ class StepContext:
     candidate: int = 0
     candidates: int = 1
     variant: str = ""
+    # campaign (D2/E2): the base image is already at the right commit (a prepared or integration
+    # image), so a replay's `--at` checkout is skipped; `pr_base` = push the fix onto this branch
+    # of the target (a later wave stacks on the previous wave's integration branch)
+    base_ready: bool = False
+    pr_base: str | None = None
 
     def spent_usd(self) -> float:
         """Running total over events.jsonl (the log flushes per emit, so this session counts)."""
@@ -210,6 +215,8 @@ def run_pipeline(
     requested_issue: int | None = None,
     at_rev: str | None = None,
     issue: IssueText | None = None,
+    base_ready: bool = False,
+    pr_base: str | None = None,
 ) -> dict[str, Any]:
     """Run every phase after `start_after` up to `stop_after`; return the result dict.
 
@@ -232,12 +239,18 @@ def run_pipeline(
             requested_issue = recorded.get("issue")
         if at_rev is None:
             at_rev = recorded.get("at")
+        base_ready = base_ready or bool(recorded.get("base_ready"))
+        pr_base = pr_base or recorded.get("pr_base")
     elif start_after is not None:
         raise ValueError(f"cannot resume {log.run_id}: run.json missing")
     else:
         record: dict[str, Any] = {"mode": steps.mode, "issue": requested_issue}
         if at_rev is not None:
             record["at"] = at_rev
+        if base_ready:
+            record["base_ready"] = True
+        if pr_base is not None:
+            record["pr_base"] = pr_base
         _write_atomic(manifest, json.dumps(record))
     ctx = StepContext(
         settings=settings,
@@ -250,6 +263,8 @@ def run_pipeline(
         requested_issue=requested_issue,
         at_rev=at_rev,
         issue=issue,
+        base_ready=base_ready,
+        pr_base=pr_base,
     )
     done = completed_phases(run_dir)
     outputs: dict[Phase, Any] = {}
@@ -637,7 +652,7 @@ def _base_box(ctx: StepContext, phase: Phase) -> Any:
 
     s = ctx.settings
     base = open_base(s, ctx.log, phase=phase)
-    if ctx.at_rev is None:
+    if ctx.at_rev is None or ctx.base_ready:
         return base
     co = base.run(f"git checkout -q --detach {shlex.quote(ctx.at_rev)}", cwd=s.workdir, keep=True)
     if not co.ok or co.box is None:
@@ -1009,7 +1024,8 @@ def _live_pr(
     ctx.log.artifact("candidate.patch", patch)
     refuse_protected(patch)  # a fix never rewrites CI: issue text may be a prompt injection
     base_rev = None
-    if ctx.at_rev is not None:
+    base_branch = ctx.pr_base or s.base_branch
+    if ctx.at_rev is not None and ctx.pr_base is None:
         sha = candidate.run(f"git rev-parse {ctx.at_rev}", cwd=s.workdir, keep=False)
         base_rev = sha.stdout.strip() if sha.ok else ctx.at_rev
     pushed = push_fix_branch(
@@ -1020,7 +1036,7 @@ def _live_pr(
         base_rev=base_rev,
         cache_dir=s.runs_dir / ".repos" / s.target_repo.replace("/", "__"),
         push_url=target.push_url,
-        base_branch=s.base_branch,
+        base_branch=base_branch,
     )
     ctx.progress.step(f"pushed {pushed.head} to {target.repo}, base {pushed.base}")
     pr_labels = labels

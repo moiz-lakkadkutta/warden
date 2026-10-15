@@ -683,6 +683,81 @@ def eval_swe(
 
 
 @app.command()
+def campaign(
+    issues: Annotated[str, typer.Option(help="Comma-separated issue numbers, e.g. 196,197,200.")],
+    at: Annotated[
+        str | None,
+        typer.Option(
+            "--at",
+            help="Replay these closed issues at this commit (one shared base); default: the "
+            "target's live head, for open issues.",
+        ),
+    ] = None,
+    out: Annotated[
+        Path, typer.Option(help="Directory for campaign.csv, campaign.md, waves.json.")
+    ] = Path("evals/fabric"),
+    budget: Annotated[
+        float, typer.Option(help="Skip a wave whose worst case would take spend over this (USD).")
+    ] = 15.0,
+    max_usd: Annotated[float | None, typer.Option(help="Override the per-issue cost cap.")] = None,
+    name: Annotated[
+        str | None,
+        typer.Option(help="Campaign id (re-use one to resume its runs); default: a new run id."),
+    ] = None,
+    yes: Annotated[
+        bool, typer.Option("--yes", "-y", help="Start and open draft PRs without asking.")
+    ] = False,
+) -> None:
+    """Plan → waves → fix/verify/draft PR per wave in parallel → merge (D2) → gate → campaign.md.
+
+    Every issue is an ordinary run (runs/<campaign>-<issue>/); WARDEN_MAX_FORKS bounds the
+    parallel runs and the wave size. Rows land in campaign.csv (same issue + --at replaces)."""
+    from warden.config import load_settings
+    from warden.eval import campaign as cp
+    from warden.runlog.events import new_run_id
+
+    try:
+        numbers = [int(x) for x in issues.replace(" ", "").split(",") if x]
+    except ValueError:
+        fail(f"--issues {issues!r} is not a list of numbers", fix="e.g. --issues 196,197", code=2)
+    if not numbers or len(set(numbers)) != len(numbers):
+        fail("--issues needs distinct issue numbers", fix="e.g. --issues 196,197", code=2)
+    s = load_settings()
+    if max_usd is not None:
+        s.max_usd_per_issue = max_usd
+    missing = s.missing_for("NEBIUS_API_KEY", "CONTREE_BASE_URL", "NEBIUS_PROJECT_ID")
+    if missing:
+        fail(f"missing {', '.join(missing)}", fix="run `warden doctor`", code=2)
+    cid = name or f"campaign-{new_run_id()}"
+    _err(
+        f"campaign {cid} · {len(numbers)} issues · {at or 'live head'} · "
+        f"cap ${s.max_usd_per_issue:.2f}/issue · budget ${budget:.2f} · "
+        f"{s.max_forks} in parallel · → {out}"
+    )
+    if not yes and not typer.confirm(
+        f"Start (spends Token Factory credit, opens draft PRs on {s.target_repo})?", err=True
+    ):
+        raise typer.Exit(1)
+    rows = cp.run_campaign(
+        numbers,
+        s,
+        cp.live_deps(s, at=at),
+        campaign_id=cid,
+        at=at,
+        out_dir=out,
+        yes=yes,
+        budget_usd=budget,
+    )
+    for r in rows:
+        print(json.dumps({k: v for k, v in r.__dict__.items()}), flush=True)
+    t = cp.tally(rows)
+    _err(
+        f"done · PASS {t['PASS']} · PWC {t['PASS_WITH_CONCERNS']} · FAIL {t['FAIL']} · "
+        f"merged {t['merged']} · PRs {t['PRs']} · ${t['USD']:.2f} · {out / cp.MD_NAME}"
+    )
+
+
+@app.command()
 def resume(
     run_id: Annotated[str, typer.Argument(help="The run_id printed by `warden run`.")],
     json_out: Annotated[

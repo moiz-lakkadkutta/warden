@@ -157,3 +157,117 @@ def push_fix_branch(
             check=False,
         )
     return PushedBranch(head=head, base=base, sha=sha)
+
+
+def _ensure_clone(runner: Runner, url: str, cache_dir: Path) -> None:
+    if (cache_dir / ".git").exists() or (cache_dir / "HEAD").exists():
+        return
+    cache_dir.parent.mkdir(parents=True, exist_ok=True)
+    res = runner(
+        ["git", "clone", "-q", "--no-checkout", url, str(cache_dir)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if res.returncode != 0:
+        raise RuntimeError(f"git clone {url} failed: {(res.stderr or '').strip()[-300:]}")
+
+
+def _resolve(runner: Runner, cache_dir: Path, ref: str) -> str:
+    """`ref` as a commit: a branch of origin first, then a sha or any other revision."""
+    for cand in (f"origin/{ref}", ref):
+        res = runner(
+            ["git", "-C", str(cache_dir), "rev-parse", "--verify", "-q", f"{cand}^{{commit}}"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if res.returncode == 0 and res.stdout.strip():
+            return res.stdout.strip()
+    raise RuntimeError(f"{ref} is not a commit or a branch of origin")
+
+
+def push_integration_branch(
+    repo: str,
+    *,
+    start: str,
+    heads: list[str],
+    name: str,
+    cache_dir: Path,
+    remote_url: str | None = None,
+    runner: Runner = subprocess.run,
+) -> str:
+    """Campaign waves (D2): on the host, `git merge --no-ff` each pushed fix branch in `heads`
+    onto `start` and push the result as branch `name`, so a later wave's draft PRs stack on it
+    and show only their own change. Mirrors the sandbox integration (same patches, same order).
+    Returns the pushed sha. Never touches the default branch."""
+    url = remote_url or f"https://github.com/{repo}.git"
+    _ensure_clone(runner, url, cache_dir)
+    _git(runner, cache_dir, "fetch", "-q", "origin")
+    base = _resolve(runner, cache_dir, start)
+    worktree = Path(tempfile.mkdtemp(prefix="wt-", dir=cache_dir.parent))
+    worktree.rmdir()
+    _git(runner, cache_dir, "worktree", "add", "-q", "--detach", str(worktree), base)
+    try:
+        for head in heads:
+            _git(
+                runner,
+                worktree,
+                "-c",
+                "user.name=warden",
+                "-c",
+                "user.email=warden@localhost",
+                "merge",
+                "--no-ff",
+                "-q",
+                "-m",
+                f"Merge {head} into {name}",
+                f"origin/{head}",
+            )
+        sha = _git(runner, worktree, "rev-parse", "HEAD")
+        _git(runner, worktree, "push", "-q", "-f", "origin", f"HEAD:refs/heads/{name}")
+    finally:
+        runner(
+            ["git", "-C", str(cache_dir), "worktree", "remove", "--force", str(worktree)],
+            capture_output=True,
+            check=False,
+        )
+    return sha
+
+
+def bundle_rev(
+    repo: str,
+    *,
+    rev: str | None,
+    exclude: str,
+    cache_dir: Path,
+    base_branch: str = "main",
+    remote_url: str | None = None,
+    runner: Runner = subprocess.run,
+) -> tuple[str, bytes]:
+    """A git bundle carrying `rev` (default: origin/<base_branch>, the live head) as ref
+    `refs/warden/campaign`, minus the history `exclude` (the base image's HEAD) already has, so a
+    sandbox can fetch it without network or token. Returns (sha, bundle bytes)."""
+    url = remote_url or f"https://github.com/{repo}.git"
+    _ensure_clone(runner, url, cache_dir)
+    _git(runner, cache_dir, "fetch", "-q", "origin")
+    sha = _resolve(runner, cache_dir, rev or base_branch)
+    _git(runner, cache_dir, "update-ref", "refs/warden/campaign", sha)
+    out = Path(tempfile.mkdtemp(prefix="bundle-", dir=cache_dir.parent)) / "campaign.bundle"
+    try:
+        has_exclude = (
+            runner(
+                ["git", "-C", str(cache_dir), "cat-file", "-e", f"{exclude}^{{commit}}"],
+                capture_output=True,
+                check=False,
+            ).returncode
+            == 0
+        )
+        spec = ["refs/warden/campaign"] + ([f"^{exclude}"] if has_exclude and exclude else [])
+        if has_exclude and exclude == sha:
+            spec = ["refs/warden/campaign"]  # same commit: a full-tip bundle is still valid
+        _git(runner, cache_dir, "bundle", "create", "-q", str(out), *spec)
+        return sha, out.read_bytes()
+    finally:
+        out.unlink(missing_ok=True)
+        out.parent.rmdir()
