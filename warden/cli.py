@@ -121,7 +121,13 @@ def doctor(
     ] = False,
 ) -> None:
     """Check local tools, credentials and (optionally) model reachability. No network by default."""
-    from warden.config import MAX_CANDIDATES, MAX_THEATER_RETRIES, load_settings
+    from warden.config import (
+        MAX_CANDIDATES,
+        MAX_IMPLEMENTER_TOKENS,
+        MAX_THEATER_RETRIES,
+        SERVER_MAX_TOKENS,
+        load_settings,
+    )
 
     print("warden doctor", file=sys.stderr)
     s = load_settings()
@@ -213,6 +219,14 @@ def doctor(
             "implementer read-loop guards",
         )
     )
+    tokens = s.implementer_max_tokens
+    checks.append(
+        (
+            f"WARDEN_IMPLEMENTER_MAX_TOKENS ({tokens or f'server default, {SERVER_MAX_TOKENS}'})",
+            0 <= tokens <= MAX_IMPLEMENTER_TOKENS,
+            f"set WARDEN_IMPLEMENTER_MAX_TOKENS to 0-{MAX_IMPLEMENTER_TOKENS}",
+        )
+    )
     checks.append(
         (
             f"WARDEN_BASE_BRANCH ({s.base_branch or 'unset'})",
@@ -233,6 +247,14 @@ def doctor(
         warnings.append(
             f"WARDEN_MAX_TOOL_TURNS={s.max_tool_turns} is below {MIN_TOOL_TURNS}: real fixes run "
             "out of turns (icalendar#1928 needed 52) → set WARDEN_MAX_TOOL_TURNS=60 in .env"
+        )
+
+    if tokens <= SERVER_MAX_TOKENS:
+        warnings.append(
+            f"WARDEN_IMPLEMENTER_MAX_TOKENS={tokens}: the implementer's replies stop at "
+            f"{tokens or SERVER_MAX_TOKENS} completion tokens (reasoning included), where Super's "
+            "whole-file writes were cut off → 16384 (default) or up to "
+            f"{MAX_IMPLEMENTER_TOKENS}"
         )
 
     if live:

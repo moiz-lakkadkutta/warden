@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
 from pydantic import BaseModel
 
 from warden.config import Role, Settings
@@ -125,3 +126,56 @@ def test_schema_echo_with_a_real_schema_body_is_still_invalid() -> None:
     schema_text = '{"type": "object", "properties": {"ok": {"type": "boolean"}}}'
     assert _schema_echo(schema_text, Out) is None
     assert _schema_echo("not json", Out) is None
+
+
+def _implementer_call(tmp_path: Path, settings: Settings) -> dict[str, Any]:
+    llm = LLM(settings, CostMeter(5.0), EventLog(tmp_path / "runs", "t"))
+    fake = FakeCompletions()
+    llm._client = SimpleNamespace(chat=SimpleNamespace(completions=fake))  # type: ignore[assignment]
+    llm.chat(Role.IMPLEMENTER, "fix", [{"role": "user", "content": "x"}], tools=[])
+    return fake.kwargs[0]
+
+
+def _settings() -> Settings:
+    return Settings(_env_file=None)  # type: ignore[call-arg]
+
+
+def test_implementer_completion_budget_comes_from_settings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # camp-head-1-210: 7 of 40 replies cut at the server default (8192); 32768 served 24980
+    monkeypatch.delenv("WARDEN_IMPLEMENTER_MAX_TOKENS", raising=False)
+    assert _settings().implementer_max_tokens == 16384
+    assert _implementer_call(tmp_path, _settings())["max_tokens"] == 16384
+    monkeypatch.setenv("WARDEN_IMPLEMENTER_MAX_TOKENS", "32768")
+    assert _implementer_call(tmp_path, _settings())["max_tokens"] == 32768
+    monkeypatch.setenv("WARDEN_IMPLEMENTER_MAX_TOKENS", "0")  # the server default
+    assert "max_tokens" not in _implementer_call(tmp_path, _settings())
+
+
+def test_implementer_completion_budget_is_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
+    from pydantic import ValidationError
+
+    monkeypatch.setenv("WARDEN_IMPLEMENTER_MAX_TOKENS", "100000")
+    with pytest.raises(ValidationError):
+        _settings()
+
+
+def test_doctor_reports_the_implementer_budget() -> None:
+    from typer.testing import CliRunner
+
+    from warden.cli import app
+
+    env = {"WARDEN_IMPLEMENTER_MAX_TOKENS": "0", "NO_COLOR": "1"}
+    res = CliRunner().invoke(app, ["doctor"], env=env)
+    assert "WARDEN_IMPLEMENTER_MAX_TOKENS (server default, 8192)" in res.stderr
+    assert "stop at 8192 completion tokens" in res.stderr
+    env = {"WARDEN_IMPLEMENTER_MAX_TOKENS": "16384", "NO_COLOR": "1"}
+    res = CliRunner().invoke(app, ["doctor"], env=env)
+    assert "WARDEN_IMPLEMENTER_MAX_TOKENS (16384)" in res.stderr
+    assert "stop at" not in res.stderr
+
+
+def test_env_example_documents_the_implementer_budget() -> None:
+    text = (Path(__file__).resolve().parents[1] / ".env.example").read_text(encoding="utf-8")
+    assert "WARDEN_IMPLEMENTER_MAX_TOKENS=16384" in text
