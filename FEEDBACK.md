@@ -98,6 +98,17 @@ Every entry: date · tool · what happened · numbers · what would have helped.
   present, 13–90 s per task (prepare + base grade + gold grade), parallelism 4. With the two
   grading fixes in, 49/50 grade as the dataset says (F2P fails on the base, gold resolves). The
   outlier is pypa__pip-11987, whose F2P test already passes on the unfixed base.
+- 2026-10-15 · C5 hunter · booting a long-lived app server inside a sandbox for probing works, but
+  the model fights the fork-per-run contract. The IDOR hunter boots Fabric's uvicorn over
+  `with-services sh -c` and drives it over localhost in a single `run`, so the server and all HTTP
+  probes share one process. Because two `run`s on a Box fork it (by design), every reproduction
+  **reboots Postgres+Redis+uvicorn from the seeded checkpoint**: a full 34-endpoint sweep measured
+  **8.6 s then 7.7 s** on two runs of one fork (`20261015-162240-1f6d`). That's cheap here, but a
+  heavier app (or a 5× reproduction) pays the cold boot each time. A supported way to **keep a
+  warm service across N runs on one fork** — or a "services already up" base variant — would cut
+  reproduction latency. Upside worth noting: the whole hunt is **$0 of Token Factory spend** (the
+  probe is deterministic; Lightning is optional and was not needed), so Sandboxes carried the
+  entire discovery phase alone.
 
 ## Token Factory inference
 
