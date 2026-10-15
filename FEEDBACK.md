@@ -162,4 +162,23 @@ Every entry: date · tool · what happened · numbers · what would have helped.
 
 ## Nebius Serverless
 
-- (fill in at Phase E3)
+- 2026-10-15 · AI endpoints · E3 run console (FastAPI, ~25 MB image layer on `python:3.12-slim`)
+  on `cpu-d3 2vcpu-8gb`, eu-west2, CLI 0.12.287. First deploy end-to-end **307 s**: registry
+  create 4 s, assemble + push 72 s, `endpoint create` → serving `/healthz` **235 s**. Redeploy
+  (push 13 s, `endpoint restart` to re-pull a moved `:live` tag) **296 s**, of which the URL was
+  down **~260 s** (one 503, then the tunnel answers `404` until the container is up). Warm
+  requests from Berlin: `/healthz` ~0.25 s, run page (27 KB) 0.23 s, index 0.44 s.
+- 2026-10-15 · AI endpoints · `nebius ai endpoint` has no `update`: changing the image means
+  `restart` (re-pulls the same tag; URL kept) or delete + create (new tunnel URL, so every link in
+  a README breaks). → an `update --image` that rolls in place, or a stable per-name URL.
+- 2026-10-15 · AI endpoints · `--platform` defaults to `gpu-h100-sxm` even for a container that
+  exposes one HTTP port; forgetting `--platform cpu-d3 --preset 2vcpu-8gb` would bill an H100 for
+  a static site. → default to the cheapest CPU preset, or make `--platform` required.
+- 2026-10-15 · AI endpoints · good: `--dry-run` validates the whole request offline in <2 s, the
+  managed `https://port<N>-….tunnel.applications.<region>.nebius.cloud` URL needs no public IP,
+  and a same-project Container Registry image pulls with no credentials. The tunnel returning
+  `404` (not `503`) while the container restarts reads like a routing bug to a monitor. → `503`
+  with `Retry-After` during start-up.
+- 2026-10-15 · Container Registry · pushing works daemonless (`crane` + the `nebius` docker
+  credential helper from `nebius registry configure-helper`), which mattered: the Mac's Docker
+  Desktop was owned by another macOS user. → say in the quickstart that any OCI client works.
