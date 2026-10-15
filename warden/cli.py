@@ -426,7 +426,7 @@ def hunt(
             log=log,
             reproduce=repro_times,
         )
-        _report_hunt(log, report, target, no_file=no_file)
+        _report_hunt(log, report, target, no_file=no_file, at=at)
 
 
 def _resolve_register(register: Path | None) -> Path | None:
@@ -435,7 +435,21 @@ def _resolve_register(register: Path | None) -> Path | None:
     return next((p for p in _FABRIC_CLONE_DEFAULTS if p.is_dir()), None)
 
 
-def _report_hunt(log: EventLog, report: HuntReport, repo: str, *, no_file: bool) -> None:
+def _replay_preamble(at: str) -> str:
+    """The disclaimer that heads a historical-replay issue: this is already fixed on main."""
+    return (
+        f"> **Historical replay — already fixed on `main`.** Warden's hunter reproduced this by "
+        f"probing Fabric checked out at `{at}` on a throwaway scratch DB. The cross-firm "
+        f"firm-spoof (register SEC-1 / AUTHZ-2) was remediated on `main` by commit `d9c37cb` "
+        f"(Wave B firm-isolation, #172); it is **not present on current `main`**. Filed as a "
+        f"Warden end-to-end demo (hunt → file → fix → verify → PR); will be closed with a link "
+        f"to the draft PR."
+    )
+
+
+def _report_hunt(
+    log: EventLog, report: HuntReport, repo: str, *, no_file: bool, at: str | None = None
+) -> None:
     from warden.hunt.filer import file_findings
 
     _err(
@@ -453,7 +467,11 @@ def _report_hunt(log: EventLog, report: HuntReport, repo: str, *, no_file: bool)
         _err("no confirmed findings to file")
         log.result(axis=report.axis, confirmed=0, filed=[])
         return
-    filed = file_findings(report.confirmed, repo, no_file=no_file, log=log)
+    preamble = _replay_preamble(at) if at else ""
+    prefix = "[replay] " if at else ""
+    filed = file_findings(
+        report.confirmed, repo, no_file=no_file, preamble=preamble, title_prefix=prefix, log=log
+    )
     for fi in filed:
         where = "would file" if fi.dry_run else (fi.url or "filed")
         _err(f"  {fi.title} -> {where}")

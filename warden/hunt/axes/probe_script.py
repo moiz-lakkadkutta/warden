@@ -30,10 +30,11 @@ MARKER = "__WARDEN_IDOR_RESULT__"
 DEFAULT_DB_URL = "postgresql+asyncpg://fabric_app:fabric_app_dev@127.0.0.1:5432/fabric_demo"
 
 
-# Superuser role (dev warns, not refuses) used to create + migrate the scratch DB for a replay.
+# Superuser (dev warns, not refuses) used to create + migrate the scratch DB for a replay.
+# The base image's superuser is `postgres` (local trust auth — no password); there is no `fabric`.
 SCRATCH_DB = "warden_replay"
-SUPERUSER_URL = "postgresql+asyncpg://fabric:fabric_dev@127.0.0.1:5432/" + SCRATCH_DB
-_ADMIN_PSQL = "postgresql://fabric:fabric_dev@127.0.0.1:5432/postgres"
+SUPERUSER_URL = "postgresql+asyncpg://postgres@127.0.0.1:5432/" + SCRATCH_DB
+_ADMIN_PSQL = "postgresql://postgres@127.0.0.1:5432/postgres"
 
 
 def boot_command(

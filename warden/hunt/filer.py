@@ -50,17 +50,25 @@ def group_findings(findings: list[Finding]) -> dict[str, list[Finding]]:
     return groups
 
 
-def issue_title(group: list[Finding]) -> str:
-    """The group's title: the first finding's, prefixed with severity and a regression marker."""
-    head = group[0]
+def _head(group: list[Finding]) -> Finding:
+    """The group's representative: prefer a finding carrying a regression id (most recognizable)."""
+    return next((f for f in group if f.regression_of), group[0])
+
+
+def issue_title(group: list[Finding], *, prefix: str = "") -> str:
+    """The group's title: the representative finding's, with severity and a regression marker."""
+    head = _head(group)
     reg = f"[regression {head.regression_of}] " if head.regression_of else ""
-    return f"[{head.severity}] {reg}{head.title}"
+    return f"{prefix}[{head.severity}] {reg}{head.title}"
 
 
-def format_body(group: list[Finding]) -> str:
+def format_body(group: list[Finding], *, preamble: str = "") -> str:
     """The strict finding format. One section per endpoint when a cause spans several."""
-    head = group[0]
+    head = _head(group)
     lines: list[str] = []
+    if preamble:
+        lines.append(preamble)
+        lines.append("")
     lines.append(f"**Severity:** {head.severity}")
     lines.append(f"**Axis:** {head.axis}  ·  **root_cause_key:** `{head.root_cause_key}`")
     if head.regression_of:
@@ -125,18 +133,24 @@ def file_findings(
     *,
     no_file: bool = False,
     label: str = HUNT_LABEL,
+    preamble: str = "",
+    title_prefix: str = "",
     runner: Runner = subprocess.run,
     log: EventLog | None = None,
 ) -> list[FiledIssue]:
-    """File one issue per ``root_cause_key``. With ``no_file`` nothing is sent (dry run)."""
+    """File one issue per ``root_cause_key``. With ``no_file`` nothing is sent (dry run).
+
+    ``preamble`` is prepended to each body and ``title_prefix`` to each title — used by a
+    historical replay to mark the issue as already-fixed-on-main up front.
+    """
     groups = group_findings(findings)
     out: list[FiledIssue] = []
     if groups and not no_file:
         ensure_label(repo, label, runner=runner)
     for key, group in groups.items():
-        title = issue_title(group)
-        body = format_body(group)
-        head = group[0]
+        title = issue_title(group, prefix=title_prefix)
+        body = format_body(group, preamble=preamble)
+        head = _head(group)
         if no_file:
             out.append(
                 FiledIssue(key, title, body, head.severity, dry_run=True,

@@ -316,6 +316,20 @@ def test_issue_title_marks_regression() -> None:
     assert issue_title([f]).startswith("[P1] [regression SEC-1]")
 
 
+def test_grouped_title_prefers_regression_head_and_prefix() -> None:
+    plain = finding("idor:cross_firm_write", title="cross firm write: POST /cost-centres")
+    reg = finding("idor:cross_firm_write", title="cross firm write: POST /parties")
+    reg.regression_of = "SEC-1"
+    # even though the plain finding is first, the title uses the regression-labelled one
+    title = issue_title([plain, reg], prefix="[replay] ")
+    assert title == "[replay] [P1] [regression SEC-1] cross firm write: POST /parties"
+
+
+def test_format_body_preamble_is_prepended() -> None:
+    body = format_body([finding("k")], preamble="> already fixed on main")
+    assert body.startswith("> already fixed on main")
+
+
 def test_file_findings_dry_run_opens_nothing() -> None:
     runner = FakeRunner()
     filed = file_findings([finding("k")], "o/r", no_file=True, runner=runner)
