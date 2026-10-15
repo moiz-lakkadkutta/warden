@@ -1,0 +1,6 @@
+# The console image only needs console/ and site/ (see console/Dockerfile).
+*
+!console/__init__.py
+!console/__main__.py
+!console/app.py
+!site/
