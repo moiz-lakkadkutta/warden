@@ -150,6 +150,31 @@ Earlier 10-task pilots (4/10 and 1/10 resolved at $0.13–$0.18 per task, one ca
 [`evals/swe_rebench/results.csv`](evals/swe_rebench/results.csv) and
 [`evals/swe_rebench/pilot-3/`](evals/swe_rebench/pilot-3/results.csv), with notes in `docs/status.md` §1d–1e.
 
+### Fabric campaign (a real ERP codebase)
+
+`warden campaign` was run on [Fabric-Inventory](https://github.com/moiz-lakkadkutta/Fabric-Inventory)
+(FastAPI + Postgres RLS, double-entry ledger, GST). It plans every issue, groups the issues into
+waves by the files they touch, runs fix → verify → draft PR for each wave in parallel, merges the
+wave's passing fixes with `git merge --no-ff` in the sandbox, and runs the full gate on the merged
+result. Fabric had one open code issue, so 8 of the 9 issues are closed ones, replayed at the
+commit before the human fix from the issue text alone. Per-issue rows, notes and run ids are in
+[`evals/fabric/campaign.md`](evals/fabric/campaign.md).
+
+| found | confirmed | PASS | PASS_WITH_CONCERNS | FAIL | PENDING-HUMAN | PRs | USD |
+|---|---|---|---|---|---|---|---|
+| 9 | 2 | **1** | 0 | 8 | 7 of 9 | 1 ([#226](https://github.com/moiz-lakkadkutta/Fabric-Inventory/pull/226), Fabric CI 7/7 green) | **$4.81** (15 attempts) |
+
+Not yet useful as an autonomous fixer on this codebase: 1 of 9. The pipeline was not the
+bottleneck. In 13 of 15 attempts the implementer (Nemotron 3 Super) never called `finish`: it
+looped on Fabric's 900-line test files, re-reading them or re-sending them whole past the
+completion limit. A 60-turn, best-of-2 retry fixed none of the five it retried. The safety side
+held:
+- No FAIL produced a branch or a PR.
+- The theater check rejected eight new tests that failed for the wrong reason.
+- The spec review caught a candidate that was green on suite, mypy and ruff but implemented 1 of
+  the issue's 4 behaviours.
+- Every money or tax issue was labelled `PENDING-HUMAN`.
+
 ## How it works
 
 ```

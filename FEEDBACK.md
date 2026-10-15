@@ -190,6 +190,32 @@ Every entry: date · tool · what happened · numbers · what would have helped.
   calls and only 2 edits — both to the test file — and never wrote the guard. Its repro test was
   right (POST /items → 201 on the unfixed base) but stayed red. With 25 turns (20261015-163738-774e)
   it also stopped mid-fix. → same ask as above: a tool-use preset that curbs re-reading.
+- 2026-10-15 · structured output · Nemotron 3.5 Lightning now reasons by default, and the reasoning
+  counts against `max_tokens`. In the Fabric campaign (run `camp-head-1-210`) the planner's
+  ResearchQueries call (strict `json_schema`) used **8192 of 8192 completion tokens twice** (35 s
+  each) and returned truncated JSON; the `json_object` fallback then answered with the *schema
+  envelope* (`{"title": …, "type": "object", "properties": {<the answer>}}`), so the plan step
+  failed for $0.007. A probe on the same request: baseline 1119 completion tokens of which 1024
+  reasoning (4.4 s); `reasoning_effort="low"` 1133/1035 (no effect); `/no_think` in the system
+  prompt 822/738; **`chat_template_kwargs: {"enable_thinking": false}` 72/0, 0.5 s**, same
+  answer. Warden now sends that for every Lightning call (8fb5576) and unwraps the schema echo.
+  → document the thinking switch per model on the model card (it is the only one that works),
+  and say whether `strict` json_schema is meant to stop a reasoning model before `max_tokens`.
+- 2026-10-15 · tool calls · Nemotron 3 Super re-sends a large file whole through `write_file`
+  even with `replace_in_file` offered. On Fabric#210 (run `camp-head-1-210`, a test-only issue)
+  it re-sent the 926-line `tests/test_migrations_router.py` 9 times; 8 replies hit the server's
+  **8192-token completion limit** (26–34 s each) and the tool call arrived **without its `content`
+  argument** (no truncation signal in the tool call itself). 40 turns, 0 tests, $0.26. Warden now
+  tells the model the reply was cut and to use `replace_in_file` (54747c7). → expose
+  `finish_reason=length` on truncated tool calls (or reject them) instead of delivering a
+  partial argument object.
+- 2026-10-15 · Fabric campaign (E2) · On a real ERP codebase, Nemotron 3 Super's tool loop is
+  the bottleneck. In 13 of 15 attempts across 9 issues, it never called `finish` (40 or 60 turns).
+  In single runs, Warden's "unchanged since turn N, you already have it" reply to a repeat
+  `read_file` fired 30 (#200, 40 turns), 71 (#197, 60×2) and 86 (#200, 60×2) times; the files
+  were 900-line test modules. A 60-turn, best-of-2 retry cost $2.21 for 5 issues and fixed none
+  (the 40-turn single run: $1.11 for 6, 1 fixed). → a Super sampling or prompt recipe for
+  long-file editing (page through, then `str_replace`) would directly raise the fix rate.
 - (fill in after Phase B3) Lightning as a tool router: turn count, wrong-tool rate.
 
 ## Nebius Serverless

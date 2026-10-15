@@ -192,7 +192,20 @@ def _format_errors(name: str, err: ValidationError) -> str:
     for e in err.errors(include_url=False):
         loc = ".".join(str(p) for p in e["loc"]) or "<args>"
         lines.append(f"  {loc}: {e['msg']}")
+    if name == "write_file" and any(
+        e["loc"] == ("content",) and e["type"] == "missing" for e in err.errors()
+    ):
+        lines.append(TRUNCATED_WRITE_HINT)
     return "\n".join(lines)
+
+
+# camp-head-1-210: Super re-sent a whole 926-line test file 9 times; each reply hit the 8192-token
+# completion limit and arrived with no `content`, and the bare "Field required" never said why.
+TRUNCATED_WRITE_HINT = (
+    "Your reply was most likely cut off at the completion limit: the file is too long to send "
+    "whole. Do not retry write_file with the whole file. Use replace_in_file(path, old, new) to "
+    "insert or change a few lines, or put new tests in a new, short test file."
+)
 
 
 _ARG_MAX = 200

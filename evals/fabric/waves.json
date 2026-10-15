@@ -1,0 +1,177 @@
+[
+  {
+    "campaign": "camp-head-1",
+    "at": "",
+    "base_sha": "aaf85a94cf18f09985db87482daadb8e860d4f4a",
+    "wave": 1,
+    "issues": [
+      210
+    ],
+    "merged": [],
+    "not_merged": {
+      "210": "no candidate to merge (FAIL or error)"
+    },
+    "image": "90773cb2-3050-4531-87d1-895e6f35180e",
+    "sha": "aaf85a94cf18f09985db87482daadb8e860d4f4a",
+    "gate": "not run (nothing merged)",
+    "gate_ok": null,
+    "integration_branch": ""
+  },
+  {
+    "campaign": "camp-replay-212",
+    "at": "43f3851^",
+    "base_sha": "fb19cde68d37146f6ef4228507fa122a520b6906",
+    "wave": 1,
+    "issues": [
+      196,
+      197,
+      200,
+      205
+    ],
+    "merged": [
+      196
+    ],
+    "not_merged": {
+      "197": "no candidate to merge (FAIL or error)",
+      "200": "no candidate to merge (FAIL or error)",
+      "205": "no candidate to merge (FAIL or error)"
+    },
+    "image": "ba28cc74-78ad-49b8-9e6d-f60a39fe9812",
+    "sha": "0de95e8b785b1b1caef0d9832cedd4d3393f5348",
+    "gate": "suite 1507 passed \u00b7 mypy \u2713 \u00b7 ruff \u2713 \u00b7 alembic 1 head \u2713 \u00b7 OpenAPI drift none",
+    "gate_ok": true,
+    "integration_branch": "warden/campaign-camp-replay-212-w1"
+  },
+  {
+    "campaign": "camp-replay-212",
+    "at": "43f3851^",
+    "base_sha": "fb19cde68d37146f6ef4228507fa122a520b6906",
+    "wave": 2,
+    "issues": [
+      206
+    ],
+    "merged": [],
+    "not_merged": {
+      "206": "no candidate to merge (FAIL or error)"
+    },
+    "image": "ba28cc74-78ad-49b8-9e6d-f60a39fe9812",
+    "sha": "0de95e8b785b1b1caef0d9832cedd4d3393f5348",
+    "gate": "not run (nothing merged)",
+    "gate_ok": null,
+    "integration_branch": ""
+  },
+  {
+    "campaign": "camp-replay-212",
+    "at": "43f3851^",
+    "base_sha": "fb19cde68d37146f6ef4228507fa122a520b6906",
+    "wave": 3,
+    "issues": [
+      207
+    ],
+    "merged": [],
+    "not_merged": {
+      "207": "no candidate to merge (FAIL or error)"
+    },
+    "image": "ba28cc74-78ad-49b8-9e6d-f60a39fe9812",
+    "sha": "0de95e8b785b1b1caef0d9832cedd4d3393f5348",
+    "gate": "not run (nothing merged)",
+    "gate_ok": null,
+    "integration_branch": ""
+  },
+  {
+    "campaign": "camp-replay-212-b",
+    "at": "43f3851^",
+    "base_sha": "fb19cde68d37146f6ef4228507fa122a520b6906",
+    "wave": 1,
+    "issues": [
+      197,
+      200,
+      205,
+      206
+    ],
+    "merged": [],
+    "not_merged": {
+      "197": "no candidate to merge (FAIL or error)",
+      "200": "no candidate to merge (FAIL or error)",
+      "205": "no candidate to merge (FAIL or error)",
+      "206": "no candidate to merge (FAIL or error)"
+    },
+    "image": "8ea65664-e287-4f02-9448-5cad1a48c952",
+    "sha": "fb19cde68d37146f6ef4228507fa122a520b6906",
+    "gate": "not run (nothing merged)",
+    "gate_ok": null,
+    "integration_branch": ""
+  },
+  {
+    "campaign": "camp-replay-212-b",
+    "at": "43f3851^",
+    "base_sha": "fb19cde68d37146f6ef4228507fa122a520b6906",
+    "wave": 2,
+    "issues": [
+      207
+    ],
+    "merged": [],
+    "not_merged": {
+      "207": "no candidate to merge (FAIL or error)"
+    },
+    "image": "8ea65664-e287-4f02-9448-5cad1a48c952",
+    "sha": "fb19cde68d37146f6ef4228507fa122a520b6906",
+    "gate": "not run (nothing merged)",
+    "gate_ok": null,
+    "integration_branch": ""
+  },
+  {
+    "campaign": "camp-replay-216",
+    "at": "3eee35f^",
+    "base_sha": "e4e0ed28625dbb228ab50a45a4ce9c60bddd48d3",
+    "wave": 1,
+    "issues": [
+      216
+    ],
+    "merged": [],
+    "not_merged": {
+      "216": "no candidate to merge (FAIL or error)"
+    },
+    "image": "bdcd4d2e-63b2-4a6b-812f-35c07af5cee5",
+    "sha": "e4e0ed28625dbb228ab50a45a4ce9c60bddd48d3",
+    "gate": "not run (nothing merged)",
+    "gate_ok": null,
+    "integration_branch": ""
+  },
+  {
+    "campaign": "camp-head-2",
+    "at": "",
+    "base_sha": "aaf85a94cf18f09985db87482daadb8e860d4f4a",
+    "wave": 1,
+    "issues": [
+      210
+    ],
+    "merged": [],
+    "not_merged": {
+      "210": "no candidate to merge (FAIL or error)"
+    },
+    "image": "5ce34368-08ed-4d12-bd1e-3f3b97316344",
+    "sha": "aaf85a94cf18f09985db87482daadb8e860d4f4a",
+    "gate": "not run (nothing merged)",
+    "gate_ok": null,
+    "integration_branch": ""
+  },
+  {
+    "campaign": "camp-replay-215",
+    "at": "60ae34b^",
+    "base_sha": "7f31dc2ef5988a8d566c1fa4c2f43e4b188835fe",
+    "wave": 1,
+    "issues": [
+      215
+    ],
+    "merged": [],
+    "not_merged": {
+      "215": "no candidate to merge (FAIL or error)"
+    },
+    "image": "848b7d44-fcc0-4749-b822-b3da3a1b0ca5",
+    "sha": "7f31dc2ef5988a8d566c1fa4c2f43e4b188835fe",
+    "gate": "not run (nothing merged)",
+    "gate_ok": null,
+    "integration_branch": ""
+  }
+]

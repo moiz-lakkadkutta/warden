@@ -93,3 +93,35 @@ def test_other_provider_errors_propagate_unchanged(tmp_path: Path) -> None:
     fake.create = boom  # type: ignore[method-assign]
     with pytest.raises(TeapotError):
         llm.structured(Role.TOOLS, "plan", "s", "u", Out)
+
+
+def test_tools_role_is_sent_with_thinking_off(tmp_path: Path) -> None:
+    llm, fake = _llm(tmp_path)
+    llm.structured(Role.TOOLS, "plan", "s", "u", Out)
+    llm.structured(Role.PLANNER, "plan", "s", "u", Out)
+    assert fake.kwargs[0]["extra_body"] == {"chat_template_kwargs": {"enable_thinking": False}}
+    assert "extra_body" not in fake.kwargs[1]
+
+
+def test_schema_echo_envelope_is_unwrapped(tmp_path: Path) -> None:
+    llm, fake = _llm(tmp_path)
+    echo = '{"title": "Out", "type": "object", "properties": {"ok": true}, "required": ["ok"]}'
+
+    def create(**kwargs: Any) -> Any:
+        fake.kwargs.append(kwargs)
+        msg = SimpleNamespace(content=echo, tool_calls=None)
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=msg)],
+            usage=SimpleNamespace(prompt_tokens=10, completion_tokens=5),
+        )
+
+    fake.create = create  # type: ignore[method-assign]
+    assert llm.structured(Role.TOOLS, "plan", "s", "u", Out).ok is True
+
+
+def test_schema_echo_with_a_real_schema_body_is_still_invalid() -> None:
+    from warden.llm.client import _schema_echo
+
+    schema_text = '{"type": "object", "properties": {"ok": {"type": "boolean"}}}'
+    assert _schema_echo(schema_text, Out) is None
+    assert _schema_echo("not json", Out) is None
