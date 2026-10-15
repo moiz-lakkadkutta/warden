@@ -380,6 +380,14 @@ def hunt(
             "fresh scratch DB (e.g. --at d9c37cb^ to hunt a bug since fixed on main).",
         ),
     ] = None,
+    only: Annotated[
+        str | None,
+        typer.Option(
+            "--only",
+            help="File only findings whose endpoint path contains this substring (e.g. --only "
+            "parties). Other confirmed findings are still printed, just not filed.",
+        ),
+    ] = None,
     plain: Annotated[bool, typer.Option(help="No colour or animation.")] = False,
 ) -> None:
     """Hunt an axis against the seeded demo tenant in a fork and file confirmed findings.
@@ -426,7 +434,7 @@ def hunt(
             log=log,
             reproduce=repro_times,
         )
-        _report_hunt(log, report, target, no_file=no_file, at=at)
+        _report_hunt(log, report, target, no_file=no_file, at=at, only=only)
 
 
 def _resolve_register(register: Path | None) -> Path | None:
@@ -448,7 +456,13 @@ def _replay_preamble(at: str) -> str:
 
 
 def _report_hunt(
-    log: EventLog, report: HuntReport, repo: str, *, no_file: bool, at: str | None = None
+    log: EventLog,
+    report: HuntReport,
+    repo: str,
+    *,
+    no_file: bool,
+    at: str | None = None,
+    only: str | None = None,
 ) -> None:
     from warden.hunt.filer import file_findings
 
@@ -463,14 +477,25 @@ def _report_hunt(
         _err(f"  {_mark(True)} {f.severity} {f.title}{reg} (×{f.reproduced_times})")
     for f in report.plausible:
         _err(f"  · plausible {f.severity} {f.title} (×{f.reproduced_times}) — not filed")
-    if not report.confirmed:
+    to_file = [f for f in report.confirmed if only in f.title] if only else report.confirmed
+    if only and len(to_file) != len(report.confirmed):
+        _err(f"--only {only!r}: filing {len(to_file)} of {len(report.confirmed)} confirmed")
+    if not to_file:
         _err("no confirmed findings to file")
-        log.result(axis=report.axis, confirmed=0, filed=[])
+        log.result(axis=report.axis, confirmed=len(report.confirmed), filed=[])
         return
+    from warden.hunt.filer import attacker_section
+
     preamble = _replay_preamble(at) if at else ""
     prefix = "[replay] " if at else ""
     filed = file_findings(
-        report.confirmed, repo, no_file=no_file, preamble=preamble, title_prefix=prefix, log=log
+        to_file,
+        repo,
+        no_file=no_file,
+        preamble=preamble,
+        title_prefix=prefix,
+        evidence=attacker_section(report.attacker),
+        log=log,
     )
     for fi in filed:
         where = "would file" if fi.dry_run else (fi.url or "filed")

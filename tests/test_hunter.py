@@ -19,7 +19,13 @@ from warden.hunt.axes.idor import (
 )
 from warden.hunt.axes.probe_script import MARKER, boot_command, parse_probe_output, probe_py
 from warden.hunt.baseline import Baseline, load_baseline
-from warden.hunt.filer import file_findings, format_body, group_findings, issue_title
+from warden.hunt.filer import (
+    attacker_section,
+    file_findings,
+    format_body,
+    group_findings,
+    issue_title,
+)
 from warden.hunt.hunter import HuntReport, run_hunt
 from warden.runlog.events import EventLog
 from warden.schemas import Finding
@@ -168,7 +174,7 @@ def test_findings_from_runs_confirms_on_threshold() -> None:
     assert len(confirmed) == 1 and not plausible
     f = confirmed[0]
     assert f.axis == "idor" and f.confirmed and f.reproduced_times == 2
-    assert f.root_cause_key == "idor:cross_firm_write" and f.severity == "P1"
+    assert f.root_cause_key == "idor:cross_firm_write:/accounting/vouchers" and f.severity == "P1"
     assert f.impact
 
 
@@ -186,7 +192,8 @@ def test_cross_org_read_is_p0() -> None:
         IdorRun(observations=[obs("cross_org_read", "/parties/{id}", status=200, vulnerable=True)])
     ] * 2
     confirmed, _ = findings_from_runs(runs, threshold=2)
-    assert confirmed[0].severity == "P0" and confirmed[0].root_cause_key == "idor:cross_org_read"
+    assert confirmed[0].severity == "P0"
+    assert confirmed[0].root_cause_key == "idor:cross_org_read:/parties/{id}"
 
 
 def test_guard_holds_yields_no_finding() -> None:
@@ -328,6 +335,29 @@ def test_grouped_title_prefers_regression_head_and_prefix() -> None:
 def test_format_body_preamble_is_prepended() -> None:
     body = format_body([finding("k")], preamble="> already fixed on main")
     assert body.startswith("> already fixed on main")
+
+
+def test_attacker_section_renders_claims() -> None:
+    sec = attacker_section({"role": "OWNER", "firm_id": None, "org_id": "abc"})
+    assert "decoded JWT" in sec
+    assert "`role`: `OWNER`" in sec and "`firm_id`: `None`" in sec
+
+
+def test_attacker_section_empty_is_blank() -> None:
+    assert attacker_section({}) == ""
+
+
+def test_format_body_includes_evidence() -> None:
+    body = format_body([finding("k")], evidence="## Attacker token (decoded JWT)\n- `role`: `X`")
+    assert "## Attacker token (decoded JWT)" in body
+
+
+def test_per_resource_grouping_files_one_issue_each() -> None:
+    # findings_from_runs keys each resource separately, so the filer makes one issue per resource
+    parties = finding("idor:cross_firm_write:/parties", title="cross firm write: POST /parties")
+    items = finding("idor:cross_firm_write:/items", title="cross firm write: POST /items")
+    groups = group_findings([parties, items])
+    assert len(groups) == 2
 
 
 def test_file_findings_dry_run_opens_nothing() -> None:

@@ -75,6 +75,30 @@ services. Lessons: (1) a 6-endpoint grouped issue is too wide for one Super cand
 issue per service (or a plan that names the service layer) is the likely fix; (2) the worktree `.env`
 still sets `WARDEN_MAX_TOOL_TURNS=25` (doctor warns).
 
+### C5 replay, attempt 2: richer evidence, one resource per issue (2026-10-15) — FAIL, close
+
+Product changes (no hint from `d9c37cb`): the probe decodes the attacking token's JWT claims
+(`firm_id: null`, 88 permissions for a fresh Owner) and, on a 201, states that the API accepted the
+write and persisted `org_id` from the token with a foreign `firm_id`; issues are one per
+resource (`root_cause_key` includes the path); titles name the finding's own register entry;
+`warden hunt --only <substr>` files one resource. A stale expected-text hint naming an internal
+guard helper was removed.
+
+| Step | Result |
+|---|---|
+| Hunt `--at d9c37cb^ --only parties`, 2× | 6 endpoints confirmed; filed `/parties` only → **[Fabric-Inventory#227](https://github.com/moiz-lakkadkutta/Fabric-Inventory/issues/227)** `[replay] [P1] [regression SEC-1]`, with an "Attacker token" section; closed with a comment |
+| Fix `20261015-175548-8d5d`, best-of-2, 60 turns | **FAIL, $0.52, no PR** (no retries, as agreed) |
+
+Candidate 2 (chosen) is the closest Warden has come: it guarded in **`app/service/masters_service.py`**
+— the service layer, as the human fix does — although the plan named routers; its new test **fails
+on the unfixed base** (valid theater repro); mypy/ruff clean; 0 regressions. It FAILed because the
+implementer used all 60 turns without calling `finish`, and because of one suite failure,
+`test_item_service.py::test_rls_blocks_cross_org_item_reads` ("audit_log is immutable"), which is red
+on the unfixed base in every replay run — most likely because the gate's `test` DB is migrated to
+the image's newer head (an audit-log immutability trigger postdates `d9c37cb^`), not the replay
+rev's. Candidate 1: invalid repro, 41 failures, mypy red. Follow-up: run the replay gate on a scratch
+DB migrated to the `--at` rev (as `hunt --at` already does), so old tests see their own schema.
+
 ## Phase A spike: done (A3–A7 live on Nebius)
 
 | Step | Commit | Result |

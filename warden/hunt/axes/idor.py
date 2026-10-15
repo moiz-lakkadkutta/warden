@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import shlex
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -75,6 +75,10 @@ class IdorRun(BaseModel):
     endpoints_enumerated: int = 0
     tenants: int = 0
     error: str = Field(default="", description="Non-empty if the harness could not boot or log in.")
+    attacker: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Decoded JWT claims of the attacking token A (role, firm_id, org_id).",
+    )
 
 
 def findings_from_runs(
@@ -120,7 +124,8 @@ def _finding(obs: Observation, *, reproduced: int, confirmed: bool) -> Finding:
         request_id=obs.request_id,
         confirmed=confirmed,
         reproduced_times=reproduced,
-        root_cause_key=f"idor:{obs.kind}",
+        # One issue per resource/service (not one issue for every id-taking endpoint at once).
+        root_cause_key=f"idor:{obs.kind}:{obs.path}",
         impact=_IMPACT[obs.kind],
     )
 
@@ -129,8 +134,8 @@ def _default_expected(kind: ProbeKind) -> str:
     if kind == "cross_org_read":
         return "404/422 — another tenant's resource must not be readable by id."
     return (
-        "422/403 — a body `firm_id` that does not belong to the caller's org must be rejected "
-        "(the firm-in-org guard that `sales_service._ensure_firm_in_org` applies elsewhere)."
+        "422/403 — a create request carrying a `firm_id` that belongs to a different tenant's org "
+        "must be rejected, not persisted."
     )
 
 

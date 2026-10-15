@@ -36,7 +36,11 @@ with its branch tree:
   as a regression of the register entry and as already fixed on main. The fix step did **not**
   pass: across 3 attempts ($1.49) the Super candidates guarded the router layer, not the service
   layer where the human fix lives. Their repro tests stayed red, so the verifier rejected them and
-  **no PR was opened**.
+  **no PR was opened**. A second try put the decoded attacker-token claims in the issue and filed
+  `/parties` alone ([#227](https://github.com/moiz-lakkadkutta/Fabric-Inventory/issues/227)). That
+  candidate guarded the service layer, and its repro failed on the unfixed base as required. It
+  still came back **FAIL ($0.52)**: it ran out of turns before calling `finish`, and one test that
+  is red on the base in replays also failed. No PR.
 - SWE-rebench on Nebius's preloaded task images: see [Results](#results).
 
 ## Runs on Nebius
