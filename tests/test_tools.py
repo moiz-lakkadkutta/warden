@@ -345,6 +345,17 @@ def test_run_shell_or_is_not_a_pipe(log: EventLog) -> None:
     assert res.ok is False and res.exit_code == 127
 
 
+def test_write_file_without_content_says_the_reply_was_cut(log: EventLog) -> None:
+    from warden.fix.tools import TRUNCATED_WRITE_HINT
+
+    _, box, _ = _setup(log)
+    res = ToolDispatcher(log).dispatch(box, "write_file", {"path": "tests/test_big.py"})
+    assert res.ok is False
+    assert "content: Field required" in res.output and TRUNCATED_WRITE_HINT in res.output
+    other = ToolDispatcher(log).dispatch(box, "write_file", {"path": "", "content": "x"})
+    assert TRUNCATED_WRITE_HINT not in other.output
+
+
 def test_write_file_empty_path(log: EventLog) -> None:
     _, box, _ = _setup(log)
     res = ToolDispatcher(log).dispatch(box, "write_file", {"path": "", "content": "x"})
