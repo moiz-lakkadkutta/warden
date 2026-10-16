@@ -125,6 +125,7 @@ def doctor(
         MAX_CANDIDATES,
         MAX_IMPLEMENTER_TOKENS,
         MAX_THEATER_RETRIES,
+        MAX_VERIFY_RETRIES,
         SERVER_MAX_TOKENS,
         load_settings,
     )
@@ -209,6 +210,14 @@ def doctor(
             f"WARDEN_THEATER_RETRIES ({s.theater_retries or 'off'})",
             0 <= s.theater_retries <= MAX_THEATER_RETRIES,
             f"set WARDEN_THEATER_RETRIES to 0-{MAX_THEATER_RETRIES} (0 = a theater FAIL is final)",
+        )
+    )
+    checks.append(
+        (
+            f"WARDEN_VERIFY_RETRIES ({s.verify_retries or 'off'})",
+            0 <= s.verify_retries <= MAX_VERIFY_RETRIES,
+            f"set WARDEN_VERIFY_RETRIES to 0-{MAX_VERIFY_RETRIES} (0 = a gate/regression/spec "
+            "FAIL is final)",
         )
     )
     checks.append(
@@ -1085,6 +1094,11 @@ def report(
         typer.Option("--write-readme", help="Replace the table between the README's markers."),
     ] = False,
     readme: Annotated[Path, typer.Option(help="README to update.")] = Path("README.md"),
+    baseline: Annotated[
+        list[Path] | None,
+        typer.Option(help="Results CSVs of an earlier eval: a first column to compare against."),
+    ] = None,
+    baseline_label: Annotated[str, typer.Option(help="Column header of --baseline.")] = "before",
 ) -> None:
     """Metrics from eval results: resolved (95% CI), verifier precision, false PASS/FAIL, $/task."""
     from warden.eval import report as rep
@@ -1097,6 +1111,14 @@ def report(
     skip = rep.read_excluded(excluded) if excluded is not None else {}
     m = rep.compute(rep.read_results(csvs), excluded=skip)
     table = rep.markdown(m, label=label)
+    if baseline:
+        gone = [p for p in baseline if not p.exists()]
+        if gone:
+            fail(f"no such file: {gone[0]}", fix="pass the earlier eval's results*.csv", code=2)
+        base_skip_path = baseline[0].parent / "excluded.txt"
+        base_skip = rep.read_excluded(base_skip_path) if base_skip_path.exists() else skip
+        before = rep.compute(rep.read_results(baseline), excluded=base_skip)
+        table = rep.markdown_compare([(baseline_label, before), (label, m)])
     if write_readme:
         try:
             readme.write_text(rep.replace_block(readme.read_text("utf-8"), table), "utf-8")

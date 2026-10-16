@@ -229,6 +229,8 @@ def evidence_table(
             "no openapi drift" if not verdict.openapi_drift else "openapi DRIFT",
         ]
     )
+    if verdict.verify_retry:  # WARDEN_VERIFY_RETRIES: the implementer fixed listed gate errors
+        gate += f" (after verify retry {verdict.verify_retry}: same checks, rerun)"
     risk = ", ".join(plan.risk_class) or "none"
     risk_cell = f"{risk} → **{PENDING_LABEL}**" if plan.needs_human else risk
     not_verified = ", ".join(verdict.not_verified) or "—"

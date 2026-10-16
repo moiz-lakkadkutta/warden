@@ -168,6 +168,9 @@ class Verdict(BaseModel):
     chosen_why: str = ""
     # theater retries (WARDEN_THEATER_RETRIES) the implementer took before this verdict; 0 = none
     theater_retry: int = 0
+    # verify retries (WARDEN_VERIFY_RETRIES): the implementer was sent back once with the gate /
+    # regression / spec failures of a candidate whose repro was valid; 0 = none
+    verify_retry: int = 0
 
     @model_serializer(mode="wrap")
     def _omit_unset_extras(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
@@ -179,6 +182,7 @@ class Verdict(BaseModel):
             ("candidates", []),
             ("chosen", None),
             ("theater_retry", 0),
+            ("verify_retry", 0),
             ("main_guard", []),
         ):
             if data.get(key) == empty:
@@ -206,6 +210,7 @@ class CandidateSummary(BaseModel):
     tool_turns: int = 0
     tests_added: int = 0
     reasons: list[str] = Field(default_factory=list)
+    verify_retry: int = 0  # the candidate went back to the implementer on verify feedback
 
 
 class SpecBehaviour(BaseModel):

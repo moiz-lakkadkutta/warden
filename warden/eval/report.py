@@ -37,6 +37,7 @@ class Result:
     usd: float
     seconds: float
     error: str = ""
+    verify_retry: str = ""  # "1:PASS;3:FAIL": candidates that took a verify retry, final verdict
 
     @property
     def is_error(self) -> bool:
@@ -67,6 +68,7 @@ class Result:
             usd=num("usd"),
             seconds=num("seconds"),
             error=(row.get("error") or "").strip(),
+            verify_retry=(row.get("verify_retry") or "").strip(),
         )
 
 
@@ -116,6 +118,8 @@ class Metrics:
     excluded: dict[str, str] = field(default_factory=dict)
     clean_passes: int = 0  # PASS without concerns
     clean_pass_resolved: int = 0
+    verify_retries: int = 0  # candidates sent back once on gate / regression / spec feedback
+    verify_retry_pass: int = 0  # ... that ended PASS / PASS_WITH_CONCERNS
 
     @property
     def resolved_pct(self) -> float:
@@ -161,7 +165,21 @@ def compute(rows: list[Result], *, excluded: dict[str, str] | None = None) -> Me
         excluded={k: v for k, v in excluded.items()},
         clean_passes=sum(r.verdict == "PASS" for r in counted),
         clean_pass_resolved=sum(r.verdict == "PASS" and r.resolved for r in counted),
+        verify_retries=sum(len(_retried(r)) for r in counted),
+        verify_retry_pass=sum(
+            sum(v in PASS_VERDICTS for v in _retried(r).values()) for r in counted
+        ),
     )
+
+
+def _retried(r: Result) -> dict[str, str]:
+    """`1:PASS;3:FAIL` → {"1": "PASS", "3": "FAIL"}."""
+    out: dict[str, str] = {}
+    for part in r.verify_retry.split(";"):
+        idx, _, verdict = part.partition(":")
+        if idx.strip():
+            out[idx.strip()] = verdict.strip()
+    return out
 
 
 def _pct(x: float) -> str:
@@ -174,6 +192,24 @@ def _dur(seconds: float) -> str:
 
 
 def markdown(m: Metrics, *, label: str = "results") -> str:
+    out = [f"| metric | {label} |", "|---|---|"]
+    out += [f"| {k} | {v} |" for k, v in metric_rows(m)]
+    return "\n".join(out) + "\n"
+
+
+def markdown_compare(columns: list[tuple[str, Metrics]]) -> str:
+    """One table, one column per eval (e.g. E1 vs E2); a metric one eval lacks shows "—"."""
+    rows = [dict(metric_rows(m)) for _, m in columns]
+    keys: list[str] = []
+    for r in rows:
+        keys += [k for k in r if k not in keys]
+    out = ["| metric | " + " | ".join(label for label, _ in columns) + " |"]
+    out.append("|---|" + "---|" * len(columns))
+    out += [f"| {k} | " + " | ".join(r.get(k, "—") for r in rows) + " |" for k in keys]
+    return "\n".join(out) + "\n"
+
+
+def metric_rows(m: Metrics) -> list[tuple[str, str]]:
     lo, hi = m.resolved_ci
     rows = [
         (
@@ -204,11 +240,17 @@ def markdown(m: Metrics, *, label: str = "results") -> str:
         ("Median wall-clock per task", _dur(m.median_seconds)),
         ("Mean tool turns (runs that reached a verdict)", f"{m.mean_turns:.1f}"),
     ]  # fmt: skip
+    if m.verify_retries:
+        rows.insert(
+            -3,
+            (
+                "Verify retries (valid repro, red gate / regression / spec: sent back once)",
+                f"{m.verify_retries} candidates, {m.verify_retry_pass} then PASS",
+            ),
+        )
     if m.excluded:
         rows.append(("Excluded (base cannot be graded; see excluded.txt)", str(len(m.excluded))))
-    out = [f"| metric | {label} |", "|---|---|"]
-    out += [f"| {k} | {v} |" for k, v in rows]
-    return "\n".join(out) + "\n"
+    return rows
 
 
 def replace_block(text: str, block: str) -> str:

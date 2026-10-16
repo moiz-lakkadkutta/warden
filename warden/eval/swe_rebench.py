@@ -30,6 +30,7 @@ from warden.config import Settings
 from warden.hunt.issue import IssueText
 from warden.runlog.events import EventLog
 from warden.sandbox.box import Box, SandboxBackend
+from warden.schemas import Verdict
 
 DATASET = "nebius/SWE-rebench"
 SPLIT = "filtered"
@@ -80,8 +81,12 @@ CSV_COLUMNS = (
     "candidates",
     "chosen",
     "resolved_candidates",
+    # verify retry: each candidate sent back once on gate / regression / spec feedback, with its
+    # final verdict ("1:PASS;3:FAIL"); "" = none
+    "verify_retry",
 )
 LEGACY_COLUMNS = CSV_COLUMNS[: CSV_COLUMNS.index("candidates")]  # results.csv before D4
+D4_COLUMNS = CSV_COLUMNS[: CSV_COLUMNS.index("verify_retry")]  # results.csv before verify retry
 
 _DIFF_HEADER = re.compile(r"^diff --git a/(\S+) b/(\S+)$", re.MULTILINE)
 _STATUSES = ("PASSED", "FAILED", "ERROR", "SKIPPED", "XFAIL", "XPASS")
@@ -362,6 +367,7 @@ class Row:
     candidates: int = 1
     chosen: int = 1  # 0: no candidate (an ERROR row)
     resolved_candidates: str = ""  # best-of-N only: "1;3" = candidates #1 and #3 resolve
+    verify_retry: str = ""  # "1:PASS;3:FAIL": candidates that took a verify retry
 
     def csv(self) -> dict[str, str]:
         d = asdict(self)
@@ -386,6 +392,7 @@ def make_row(
     candidates: int = 1,
     chosen: int = 1,
     resolved_candidates: str = "",
+    verify_retry: str = "",
 ) -> Row:
     return Row(
         task_id=task.instance_id,
@@ -403,7 +410,15 @@ def make_row(
         candidates=candidates,
         chosen=chosen,
         resolved_candidates=resolved_candidates,
+        verify_retry=verify_retry,
     )
+
+
+def verify_retry_cell(verdict: Verdict) -> str:
+    """The CSV's verify_retry cell: "k:VERDICT" per candidate that took a verify retry."""
+    if verdict.candidates:
+        return ";".join(f"{c.index}:{c.decision}" for c in verdict.candidates if c.verify_retry)
+    return f"1:{verdict.decision}" if verdict.verify_retry else ""
 
 
 def error_row(task: Task, err: BaseException, *, usd: float, seconds: float) -> Row:
@@ -437,7 +452,7 @@ def append_row(csv_path: Path, row: Row) -> None:
     if not new:
         with csv_path.open(encoding="utf-8", newline="") as fh:
             header = tuple(next(csv.reader(fh), ()))
-        if header == LEGACY_COLUMNS:
+        if header in (LEGACY_COLUMNS, D4_COLUMNS):
             _upgrade_csv(csv_path)
         elif header != CSV_COLUMNS:
             raise ValueError(f"{csv_path} has other columns ({', '.join(header)}); use a new --out")
@@ -457,8 +472,10 @@ def _upgrade_csv(csv_path: Path) -> None:
         w = csv.DictWriter(fh, fieldnames=CSV_COLUMNS)
         w.writeheader()
         for r in old:
-            chosen = "0" if r.get("verdict") == "ERROR" else "1"
-            w.writerow({**r, "candidates": "1", "chosen": chosen, "resolved_candidates": ""})
+            if "candidates" not in r:  # pre-D4: single-candidate rows
+                chosen = "0" if r.get("verdict") == "ERROR" else "1"
+                r = {**r, "candidates": "1", "chosen": chosen, "resolved_candidates": ""}
+            w.writerow({**r, "verify_retry": r.get("verify_retry") or ""})
     tmp.replace(csv_path)
 
 
@@ -538,6 +555,7 @@ def run_task(task: Task, settings: Settings, *, progress: Any = None) -> Row:
             resolved_candidates=";".join(str(i) for i in sorted(resolving))
             if verdict.candidates
             else "",
+            verify_retry=verify_retry_cell(verdict),
         )
     except ProviderBudgetError:
         raise
