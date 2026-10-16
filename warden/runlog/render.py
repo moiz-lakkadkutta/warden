@@ -229,7 +229,7 @@ def _models(events: list[RunEvent], evidence_rows: list[tuple[str, str]]) -> lis
             if m not in seen:
                 seen.append(m)
     if seen:
-        return seen
+        return sorted(seen, key=_model_tier)
     cost = next((r for c, r in evidence_rows if c == "Cost"), "")
     for chunk in _plain(cost).split("·"):
         part = chunk.strip()
@@ -238,7 +238,13 @@ def _models(events: list[RunEvent], evidence_rows: list[tuple[str, str]]) -> lis
         name = part.rsplit(" ", 1)[0] if " " in part else part
         if name not in seen:
             seen.append(name)
-    return seen
+    return sorted(seen, key=_model_tier)
+
+
+def _model_tier(model: str) -> int:
+    """Chip order by size (ux-brief §2.4: Ultra · Super · Lightning); unknown names go last."""
+    low = model.lower()
+    return next((i for i, w in enumerate(("ultra", "super", "lightning")) if w in low), 3)
 
 
 def _fmt_ms(ms: int) -> str:
@@ -333,7 +339,8 @@ def _css() -> str:
         "@media (max-width:600px){#tree{flex-direction:column}}"
         "@media (max-width:600px){.branches{padding-left:0}"
         ".branches::before,.edge::before{display:none}"
-        ".node{align-self:stretch}#timeline a{padding:6px 4px}}"
+        ".node{align-self:stretch}#timeline{flex-wrap:wrap}"
+        "#timeline a{flex-basis:auto;min-width:max-content;padding:6px 6px}}"
         f"{phase_rules}{verdict_rules}"
         "</style>"
     )

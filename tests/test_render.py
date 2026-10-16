@@ -273,3 +273,24 @@ def test_render_run_writes_index_html(tmp_path: Path) -> None:
     assert "&lt;3 vouchers &amp; 1 &lt;b&gt;bold&lt;/b&gt;" in page
     assert "<b>bold</b>" not in page
     assert "<script" not in page and "https://" not in page  # single file, no external assets
+
+
+def test_model_chips_ordered_ultra_super_lightning() -> None:
+    """ux-brief §2.4: routing chips read Ultra · Super · Lightning whatever the call order."""
+    llm = [
+        _ev("plan", "llm", {"model": "nvidia/Nemotron-3_5-Lightning"}, usd=0.01),
+        _ev("plan", "llm", {"model": "nvidia/nemotron-3-super-120b-a12b"}, usd=0.01),
+        _ev("plan", "llm", {"model": "nvidia/Nemotron-3-Ultra-550b-a55b"}, usd=0.01),
+    ]
+    page = render_html("t", llm, None, None)
+    header = page[page.index('id="header"') : page.index('id="timeline"')]
+    ultra = header.index("Nemotron-3-Ultra")
+    assert ultra < header.index("nemotron-3-super") < header.index("Nemotron-3_5-Lightning")
+
+
+def test_timeline_labels_wrap_on_a_phone() -> None:
+    """At 390 px five bars cannot fit their `phase $x.xx` labels; they wrap, not ellipsize."""
+    page = render_html("t", [_ev("fix", "note", {"text": "a"})], None, None)
+    mobile = page[page.index("@media (max-width:600px)") :]
+    assert "#timeline{flex-wrap:wrap}" in mobile
+    assert "#timeline a{flex-basis:auto;min-width:max-content" in mobile
