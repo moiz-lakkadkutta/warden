@@ -1,0 +1,29 @@
+# Renders the README hero GIF from docs/demo/hero.tape (offline: doctor, run --demo, console)
+# and uploads it as an artifact. It proves the tape still runs against the current CLI; to update
+# the committed GIF, download the artifact (or run `vhs docs/demo/hero.tape` locally) and commit it.
+name: hero-gif
+on:
+  push:
+    paths: ["docs/demo/hero.tape", "warden/cli.py", "warden/ui.py", "warden/demo.py", "warden/runlog/**"]
+  workflow_dispatch:
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - run: uv python install 3.12
+      - run: uv sync --all-extras --dev
+      - uses: charmbracelet/vhs-action@v2
+        with:
+          path: docs/demo/hero.tape
+      - name: GIF exists and stays under 3 MB
+        run: |
+          test -s docs/demo/hero.gif
+          test "$(stat -c %s docs/demo/hero.gif)" -lt 3000000
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hero-gif
+          path: docs/demo/hero.gif
