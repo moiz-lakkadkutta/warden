@@ -4,13 +4,14 @@ Relative to the base, never absolute: a test that already fails on the unfixed b
 candidate's fault. The tests are the existing test files related to a module the candidate
 changed, chosen on the base (`related_tests`: named after it first, then mentioning it
 case-insensitively or by dotted path; capped). Nothing related is an explicit "not run", which the
-verdict lists as not verified, never green. The base's version of each file is copied onto a
-fork of the candidate, so a candidate that edited a test cannot hide a regression by weakening it.
-A red test in a file the candidate itself edited is a *changed expectation* (the issue may ask for
-new behaviour); a red test in a file it did not touch is *broken*. No per-test outcomes on either
-side, or a timeout, is inconclusive — never proof either way. Both runs keep the tail of their
-output (verify/tail.py: the sandbox keeps only the head of long output, and the `-rA` lines are
-last); when a tail was cut, a node missing from one side is not compared.
+verdict lists as not verified, never green. The base's version of each file is restored (from
+git, never through stdout) on a fork of the candidate, so a candidate that edited a test cannot
+hide a regression by weakening it. A red test in a file the candidate itself edited is a
+*changed expectation* (the issue may ask for new behaviour); a red test in a file it did not
+touch is *broken*. No per-test outcomes on either side, or a timeout, is inconclusive — never
+proof either way. Both runs keep the tail of their output (verify/tail.py: the sandbox keeps
+only the head of long output, and the `-rA` lines are last); when a tail was cut, a node missing
+from one side is not compared.
 
 Hidden grading data (a task's test patch, FAIL_TO_PASS / PASS_TO_PASS) is never an input here.
 """
@@ -174,6 +175,16 @@ def related_tests(
     return (tier1 + tier2 + tier3)[:cap]
 
 
+def restore_base_tests(candidate: Box, quoted_files: str, *, cwd: str) -> Box | None:
+    """A fork of the candidate with the base's version of each test file, from git (the
+    candidate's HEAD is the base commit; its change is the working tree). Never through stdout:
+    the sandbox keeps only the first 64 KiB of output, and gmr__pamqp-52 (E1) copied a cut
+    `cat` of a 1700-line test file onto the candidate, a SyntaxError that read as 237
+    regressions and ranked the one candidate the hidden tests accept below an empty diff."""
+    res = candidate.run(f"git checkout -q HEAD -- {quoted_files}", cwd=cwd, keep=True)
+    return res.box if res.ok else None
+
+
 def regression_check(
     base: Box,
     candidate: Box,
@@ -206,12 +217,18 @@ def regression_check(
         names = ", ".join(t.stem for t in tgts)
         return RegressionResult.not_run(f"no existing test file names or mentions {names}")
 
-    contents = {
-        f: base.run(f"cat {shlex.quote(f)}", cwd=cwd, keep=False).stdout.encode() for f in files
-    }
-    command = f"{test_cmd} {' '.join(shlex.quote(f) for f in files)}"
+    quoted = " ".join(shlex.quote(f) for f in files)
+    command = f"{test_cmd} {quoted}"
     on_base = base.run(wrapped(keep_tail(command)), cwd=cwd, keep=False, timeout=timeout)
-    probe = candidate.copy_in(contents, cwd=cwd)
+    probe = restore_base_tests(candidate, quoted, cwd=cwd)
+    if probe is None:
+        return RegressionResult(
+            tuple(files),
+            parse_outcomes(on_base.stdout),
+            {},
+            inconclusive=True,
+            output=f"$ {command}\n\n# could not restore the base's test files on the candidate",
+        )
     on_cand = probe.run(wrapped(keep_tail(command)), cwd=cwd, keep=False, timeout=timeout)
 
     before, after = parse_outcomes(on_base.stdout), parse_outcomes(on_cand.stdout)

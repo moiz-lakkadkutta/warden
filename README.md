@@ -71,9 +71,11 @@ differ by temperature (0.1, 0.5, 0.8) and by a note telling candidate k how the 
 the earlier ones. The verifier then picks one by a fixed rule, first difference wins:
 
 1. verdict: PASS > PASS WITH CONCERNS > FAIL only because a check could not finish > FAIL
-2. a new test that fails on the unfixed base (theater check) beats one that did not
-3. fewer regressions + unmet spec behaviours, then fewer concerns
-4. smaller diff (lines added + removed), then lower cost, then the earlier candidate
+2. a candidate that changed the code beats an empty diff (an empty diff cannot fix anything;
+   on E1's pamqp two empty FAILs outranked the 2-line fix the hidden tests accept)
+3. a new test that fails on the unfixed base (theater check) beats one that did not
+4. fewer regressions + unmet spec behaviours, then fewer concerns
+5. smaller diff (lines added + removed), then lower cost, then the earlier candidate
 
 A clean PASS (PASS with a theater-proven test) stops the run early: later candidates are skipped,
 since only a smaller diff could outrank it. (The catch: a false PASS stops the run too, so

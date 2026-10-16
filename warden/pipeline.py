@@ -426,12 +426,14 @@ BEST_OF_N = "best_of_n.json"  # the winner's Verdict with every candidate listed
 TEMPERATURES = (0.1, 0.5, 0.8)  # candidate 1 keeps the single-run default; later ones reuse 0.8
 _TIERS = {"PASS": 0, "PASS_WITH_CONCERNS": 1, "FAIL": 2}
 RANK_RULE = (
-    "verdict (PASS > PASS_WITH_CONCERNS > inconclusive FAIL > FAIL), then a new test that failed "
-    "on the unfixed base, then fewer regressions + unmet spec behaviours, then fewer concerns, "
-    "then a smaller diff, then lower cost, then the earlier candidate"
+    "verdict (PASS > PASS_WITH_CONCERNS > inconclusive FAIL > FAIL), then a candidate that changed "
+    "the code over an empty diff, then a new test that failed on the unfixed base, then fewer "
+    "regressions + unmet spec behaviours, then fewer concerns, then a smaller diff, then lower "
+    "cost, then the earlier candidate"
 )
 _CRITERIA = (
     "verdict",
+    "a change",
     "theater",
     "regressions + unmet spec",
     "concerns",
@@ -445,15 +447,19 @@ def candidate_temperature(k: int) -> float:
     return TEMPERATURES[min(max(k, 1), len(TEMPERATURES)) - 1]
 
 
-def rank_key(c: CandidateSummary) -> tuple[int, int, int, int, int, float, int]:
+def rank_key(c: CandidateSummary) -> tuple[int, int, int, int, int, int, float, int]:
     """Best-of-N order, lowest first (RANK_RULE). A skipped candidate sorts after every
-    verified one; an unmeasured diff after every measured one."""
+    verified one; an unmeasured diff after every measured one. An empty diff (0 lines: the
+    implementer changed nothing) sorts after every candidate that changed the code: it cannot
+    fix anything, and on gmr__pamqp-52 (E1) two empty FAILs, with 1 unmet spec behaviour each,
+    otherwise outranked a 2-line fix the hidden tests accept."""
     if c.status != "verified" or c.decision is None:
         tier = 9
     else:
         tier = _TIERS[c.decision] + (1 if c.decision == "FAIL" and not c.inconclusive else 0)
     return (
         tier,
+        1 if c.diff_lines == 0 else 0,
         0 if c.theater_failed_on_base else 1,
         c.regressions + c.spec_unmet,
         c.concerns,
@@ -482,13 +488,15 @@ def why_chosen(winner: CandidateSummary, others: list[CandidateSummary]) -> str:
         if i == 0:
             detail = f"{_label(winner)} vs {_label(o)}"
         elif i == 1:
+            detail = f"{winner.diff_lines if winner.diff_lines is not None else '?'} lines vs none"
+        elif i == 2:
             detail = "its new test fails on the unfixed base"
-        elif i == 4:
+        elif i == 5:
             other = o.diff_lines if o.diff_lines is not None else "?"
             detail = f"{winner.diff_lines} vs {other} lines"
-        elif i == 5:
-            detail = f"${winner.cost_usd:.2f} vs ${o.cost_usd:.2f}"
         elif i == 6:
+            detail = f"${winner.cost_usd:.2f} vs ${o.cost_usd:.2f}"
+        elif i == 7:
             detail = "a tie; the earlier one"
         else:
             detail = f"{wk[i]} vs {ok[i]}"
