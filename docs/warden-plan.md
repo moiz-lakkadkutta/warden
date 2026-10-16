@@ -273,8 +273,8 @@ These are build items, not polish. Each lands in the phase noted.
 | PR prompt + `--yes` | B5 | the only confirmation in the product |
 | `--demo` | E4 | bundled tiny repo + recorded run so a judge needs no GitHub token |
 | Error style | B1 | human sentence, then the fix, then `run_id`; traceback only with `--debug` |
-| Startup latency | A2 | `typer-slim`; lazy-import openai/contree/tavily inside commands; `[project.scripts] warden = "warden.cli:app"`; `requires-python = ">=3.12"` so `uvx warden` works |
-| README hero | E4 | VHS `.tape` → GIF in CI; three commands: `uvx warden doctor`, `uvx warden run --demo`, console URL |
+| Startup latency | A2 | `typer-slim`; lazy-import openai/contree/tavily inside commands; `[project.scripts] warden = "warden.cli:app"`; `requires-python = ">=3.12"` so `warden` works |
+| README hero | E4 | VHS `.tape` → GIF in CI; three commands: `warden doctor`, `warden run --demo`, console URL |
 
 ## 6. Prompts (keep in `prompts/*.md`, versioned, referenced by hash in events)
 

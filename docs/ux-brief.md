@@ -75,7 +75,7 @@ Keep the narrative under 80 words above the table. Reviewers complain about "lot
 
 ### 2.6 README hero
 
-First screen: name, one sentence, a VHS-generated GIF (reviewable `.tape` file, regenerated in CI; 1200×720, 20 pt), then three commands: `uvx warden doctor`, `uvx warden run --demo`, and the console URL. The `--demo` flag runs against a bundled tiny repo so a judge needs no GitHub token. Below the fold: "Runs on Nebius", "NVIDIA models", "Results".
+First screen: name, one sentence, a VHS-generated GIF (reviewable `.tape` file, regenerated in CI; 1200×720, 20 pt), then three commands: `warden doctor`, `warden run --demo`, and the console URL. The `--demo` flag runs against a bundled tiny repo so a judge needs no GitHub token. Below the fold: "Runs on Nebius", "NVIDIA models", "Results".
 
 ### 2.7 Visual direction
 
