@@ -101,7 +101,21 @@ writes a test that bites (it can run its tests on the unfixed source with `run_t
 within min(20, max turns / 3) extra turns and the same per-issue cost cap. Verify then reruns;
 the verdict is the last attempt's and says "repro found on retry 1", and the first attempt's
 verdict, candidate and evidence stay as `*.attempt1.*`. A red suite, a regression or an unmet
-spec behaviour never retries.
+spec behaviour never takes the theater retry; that is the verify retry's case.
+
+**Verify retry** (`WARDEN_VERIFY_RETRIES`, default 1; 0 = off). When the theater check *proves*
+the repro (a new test fails on the unfixed base and passes with the fix) but the suite, mypy /
+ruff, a migration / OpenAPI check, the regression check or the spec review is red, the
+implementer continues once from its candidate checkpoint with a compact note: the failing test
+node ids with pytest's one-line error, mypy / ruff errors as `file:line`, the regressed tests,
+the unmet behaviours, and "keep the fix and the repro; do not edit, skip or silence tests or
+checks". It gets min(8, max turns / 3) extra turns within the same per-issue cap, and is skipped
+(logged as `verify_retry: skipped`) when less than 20% of the cap is left, so a near-cap
+candidate keeps its FAIL rather than becoming an ERROR. Verify then reruns every check
+unchanged. Fabric #196 and #206 (`camp-replay-212-d`) were this case: valid repro, 2 suite
+failures plus mypy / ruff errors. The verdict carries `verify_retry: 1`, the events
+`verify_retry: sent / start / outcome`, and the eval CSV a `verify_retry` column
+(`1:PASS;3:FAIL` per candidate).
 
 **Guard on the main behaviour.** The spec review maps each stated behaviour to the new tests
 that exercise it, main behaviour first. When every test mapped to the main behaviour passes on

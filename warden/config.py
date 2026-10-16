@@ -16,6 +16,7 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 MAX_THEATER_RETRIES = 3  # doctor checks WARDEN_THEATER_RETRIES against it
+MAX_VERIFY_RETRIES = 1  # doctor checks WARDEN_VERIFY_RETRIES against it (once, by design)
 MAX_CANDIDATES = 8  # best-of-N upper bound (doctor checks WARDEN_CANDIDATES against it)
 SERVER_MAX_TOKENS = 8192  # Token Factory's completion budget when a request sends no max_tokens
 MAX_IMPLEMENTER_TOKENS = 32768  # the largest budget probed live for Super (24980 tokens returned)
@@ -94,6 +95,11 @@ class Settings(BaseSettings):
     # base", the implementer continues from the candidate with that feedback and verify reruns
     # (run 20261014-131452-cd9b: right fix, all 4 new tests already passed on base). 0 = off.
     theater_retries: int = Field(default=1, ge=0, alias="WARDEN_THEATER_RETRIES")
+    # Verify retry: the theater check proves the repro but the suite, mypy/ruff, the regression
+    # check or the spec review is red → the implementer continues once from the candidate with
+    # a compact note (failing test ids, file:line errors, unmet behaviours), then verify reruns
+    # (Fabric #196 / #206 in camp-replay-212-d). The checks are never loosened. 0 = off.
+    verify_retries: int = Field(default=1, ge=0, alias="WARDEN_VERIFY_RETRIES")
     # Verifier's spec review: one VERDICT call comparing the diff with the issue's stated behaviours
     spec_check: bool = Field(default=True, alias="WARDEN_SPEC_CHECK")
     # The repo's own test command (no file args). Set: it is the gate's suite and the regression

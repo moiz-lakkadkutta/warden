@@ -197,3 +197,63 @@ def with_theater_retry(v: Verdict, retries: int) -> Verdict:
         return reason
 
     return v.model_copy(update={"theater_retry": retries, "reasons": [note(r) for r in v.reasons]})
+
+
+def verify_fixable(v: Verdict) -> list[str]:
+    """The red checks a verify retry can hand back: suite, mypy, ruff, alembic, OpenAPI drift,
+    regressions, unmet spec behaviours (each as a short label). [] = nothing fixable is red."""
+    red: list[str] = []
+    if any(r.startswith("full suite not green") for r in v.reasons):
+        red.append("suite")
+    for name, bad in (
+        ("mypy", not v.mypy_ok),
+        ("ruff", not v.ruff_ok),
+        ("alembic", not v.alembic_single_head),
+        ("openapi", v.openapi_drift),
+    ):
+        if bad and any(r.startswith(_RED_PREFIX[name]) for r in v.reasons):
+            red.append(name)
+    if v.regressions:
+        red.append("regression")
+    if v.spec_unmet:
+        red.append("spec")
+    return red
+
+
+# a check the profile does not run leaves its Verdict flag False; only a red *reason* counts
+_RED_PREFIX = {
+    "mypy": "mypy red",
+    "ruff": "ruff check / format red",
+    "alembic": "alembic upgrade + single head red",
+    "openapi": "OpenAPI snapshot drift red",
+}
+
+
+def verify_retryable(cand: Candidate, v: Verdict) -> bool:
+    """A FAIL with a proven repro (a new test fails on the unfixed base and passes with the fix)
+    whose fail reasons the implementer can act on: the suite, a configured lint / type /
+    migration / OpenAPI check, the regression check or the spec review. Fabric #196 and #206
+    (camp-replay-212-d) were this: the right repro, 2 suite failures plus mypy / ruff errors.
+
+    Never for a theater FAIL (theater_retryable owns that), a suite that timed out (nothing to
+    feed back: unverified, not wrong), a gate that did not run, or a candidate with no tests.
+    "Implementer did not finish" may ride along: the retry is another chance to finish."""
+    if v.decision != "FAIL" or not v.theater_failed_on_base or not cand.tests_added:
+        return False
+    if v.inconclusive or "gate did not run" in v.reasons:
+        return False
+    if any(r.startswith("full suite timed out") for r in v.reasons):
+        return False
+    return bool(verify_fixable(v))
+
+
+def with_verify_retry(v: Verdict, retries: int) -> Verdict:
+    """The verdict after a verify retry, saying so (the checks themselves are unchanged)."""
+    if retries <= 0:
+        return v
+    note = (
+        f"verify retry {retries}: green after the gate / regression / spec feedback"
+        if v.decision != "FAIL"
+        else f"verify retry {retries}: still red after the gate / regression / spec feedback"
+    )
+    return v.model_copy(update={"verify_retry": retries, "reasons": [*v.reasons, note]})

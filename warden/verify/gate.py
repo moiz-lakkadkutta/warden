@@ -24,6 +24,10 @@ _SUMMARY = re.compile(r"(\d+) (passed|failed|errors?|skipped|xfailed|xpassed)")
 # "21314 passed, 42 skipped, 597 xfailed in 69s" (no fraction)
 _SUMMARY_LINE = re.compile(r"^=+ .* =+$|\bin \d+(?:\.\d+)?s\b")
 _TAIL = 2000
+# The suite's tail is the pytest short summary (`FAILED node - Error: msg` lines + the counts),
+# what a verify retry feeds back; stderr (a replay's alembic log) goes first so it never pushes
+# the summary out.
+_SUITE_TAIL = 4000
 
 
 @dataclass(frozen=True)
@@ -149,7 +153,7 @@ class GateStep:
     shell: str
     exit_code: int
     ms: int
-    tail: str  # last 2000 chars of stdout+stderr
+    tail: str  # last 2000 chars of stdout+stderr (suite: 4000 of stderr+stdout)
     skipped: bool = False  # command was "" for this profile: not run, never evidence
 
     @property
@@ -262,7 +266,8 @@ def run_gate(
         run = keep_tail(shell) if keep_end else shell
         command = f"{wrap} {shlex.quote(run)}" if wrap else run
         res = box.run(command, cwd=cwd, **kw)
-        tail = (res.stdout + res.stderr)[-_TAIL:]
+        out = res.stderr + res.stdout if keep_end else res.stdout + res.stderr
+        tail = out[-(_SUITE_TAIL if keep_end else _TAIL) :]
         steps.append(GateStep(name, shell, res.exit_code, res.ms, tail))
         return res
 
