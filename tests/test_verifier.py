@@ -7,7 +7,7 @@ from warden.verify.gate import GateResult, GateStep
 from warden.verify.regression import RegressionResult
 from warden.verify.spec import SpecResult
 from warden.verify.theater import TheaterResult
-from warden.verify.verifier import decide
+from warden.verify.verifier import MAIN_GUARD, decide, main_guard, theater_retryable
 
 
 def _cand(**kw: object) -> Candidate:
@@ -202,3 +202,86 @@ def test_invalid_repro_is_fail_and_carries_the_per_test_reasons() -> None:
     assert not v.inconclusive  # checked and rejected, not "could not check"
     assert v.theater_tests == reasons
     assert any(r.startswith("theater: invalid repro — t.py::test_a: invalid") for r in v.reasons)
+
+
+# ------------------------------------------------- main behaviour tested only by a guard (E1)
+
+# E1 bridgecrewio__checkov-831 (recorded theater reasons, shortened): a Pod test reproduced, the
+# test of the issue's own workload scenario passed on the unfixed base. The PASS was false.
+CK = "tests/kubernetes/checks/test_Seccomp.py"
+CK_REASONS = {
+    f"{CK}::TestSeccomp::test_pod_runtime_default": "repro: fails on base (AssertionError), "
+    "passes with the fix",
+    f"{CK}::TestSeccomp::test_workload_runtime_default": "guard: passes on base",
+}
+
+
+def _ck_theater() -> TheaterResult:
+    return TheaterResult(
+        failed_on_base=True,
+        exit_code=1,
+        stdout="",
+        base_uuid="b",
+        probe_uuid="p",
+        reasons=dict(CK_REASONS),
+    )
+
+
+def _mapped(tests: list[str]) -> SpecResult:
+    review = SpecReview.model_validate(
+        {
+            "behaviours": [
+                {
+                    "behaviour": "RuntimeDefault passes for workloads",
+                    "quote": "needs to be fixed for workloads",
+                    "met": "yes",
+                    "evidence": "diff",
+                    "tests": tests,
+                },
+                {"behaviour": "other", "quote": "x", "met": "yes", "evidence": "", "tests": []},
+            ]
+        }
+    )
+    return SpecResult(review)
+
+
+def test_a_main_behaviour_tested_only_by_a_guard_turns_pass_into_pass_with_concerns() -> None:
+    cand = _cand(tests_added=list(CK_REASONS))
+    v = decide(cand, _ck_theater(), _green(), spec=_mapped(["test_workload_runtime_default"]))
+    assert v.decision == "PASS_WITH_CONCERNS"
+    assert v.main_guard == [f"{CK}::TestSeccomp::test_workload_runtime_default"]
+    assert any(c.startswith(MAIN_GUARD) for c in v.concerns)
+    assert theater_retryable(cand, v)  # one theater retry to write the test that bites
+
+
+def test_a_reproducing_main_test_or_an_unmapped_one_changes_nothing() -> None:
+    cand = _cand(tests_added=list(CK_REASONS))
+    for tests in (
+        [f"{CK}::TestSeccomp::test_pod_runtime_default"],  # reproduces
+        [f"{CK}::TestSeccomp::test_workload_runtime_default", "test_pod_runtime_default"],
+        ["test_unknown"],  # names no theater node: no claim either way
+        [],
+    ):
+        v = decide(cand, _ck_theater(), _green(), spec=_mapped(tests))
+        assert v.decision == "PASS" and v.main_guard == [], tests
+        assert not theater_retryable(cand, v)
+
+
+def test_main_guard_matches_file_class_and_parametrized_names() -> None:
+    reasons = {
+        "a/t_x.py::C::test_y[1]": "guard: passes on base",
+        "a/t_x.py::C::test_y[2]": "guard: passes on base",
+        "a/t_z.py::test_q": "repro: fails on base",
+    }
+    assert main_guard(["t_x.py::C::test_y"], reasons) == list(reasons)[:2]
+    assert main_guard(["a/t_x.py"], reasons) == list(reasons)[:2]
+    assert main_guard(["test_y"], reasons) == list(reasons)[:2]
+    assert main_guard(["a/t_z.py::test_q"], reasons) == []
+    assert main_guard(["a/t_x.py", "a/t_z.py"], reasons) == []
+
+
+def test_a_guarded_main_behaviour_never_rescues_a_fail() -> None:
+    cand = _cand(tests_added=list(CK_REASONS))
+    spec = _mapped(["test_workload_runtime_default"])
+    v = decide(cand, _ck_theater(), _green(ruff_ok=False), spec=spec)
+    assert v.decision == "FAIL" and not theater_retryable(cand, v)

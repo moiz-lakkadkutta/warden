@@ -451,6 +451,13 @@ CAND = Candidate(issue=1, image_uuid="c", tool_turns=9, tests_added=[T], cost_us
     [
         ({}, CAND, True),
         ({"decision": "PASS"}, CAND, False),
+        # a non-FAIL whose main-behaviour tests are all guards (E1 checkov-831) retries once
+        ({"decision": "PASS_WITH_CONCERNS", "main_guard": [f"{T}::test_a"]}, CAND, True),
+        (
+            {"decision": "PASS_WITH_CONCERNS", "main_guard": [f"{T}::test_a"]},
+            CAND.model_copy(update={"done": False}),
+            False,
+        ),
         ({"theater_failed_on_base": True}, CAND, False),
         ({"theater_inconclusive": True}, CAND, False),
         ({"suite": {"passed": 10, "failed": 2}}, CAND, False),
@@ -499,3 +506,15 @@ def test_feedback_has_reasons_output_diff_and_the_instruction() -> None:
     assert f"{T}::test_a: guard: passes on base" in text
     assert "TAIL" in text and "x" * 3000 not in text  # trimmed to its tail
     assert "+fix" in text and "Keep the fix" in text and "run_tests_unfixed" in text
+
+
+def test_feedback_for_a_guarded_main_behaviour_asks_for_the_issues_own_scenario() -> None:
+    v = _v(
+        decision="PASS_WITH_CONCERNS",
+        theater_failed_on_base=True,
+        main_guard=[f"{T}::test_a"],
+        reasons=[THEATER_PASSED],
+    )
+    text = feedback(v, attempt=1, retries=1, base_output="", fix_diff="+fix")
+    assert "MAIN behaviour" in text and f"{T}::test_a" in text
+    assert "issue's own scenario" in text and "rejected the candidate" not in text

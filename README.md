@@ -48,7 +48,7 @@ The implementer's word is never evidence. A candidate is **FAIL** unless every r
 | Theater | fork of the unfixed base + only the new test files | every new test passes without the fix |
 | Gate | disposable forks of the candidate | suite red, or a configured lint / type / migration / OpenAPI check red |
 | Existing tests | base and candidate, with the **base's** test files named after or mentioning a changed module | a test green on base is red on the candidate (no related test file: not verified, and a concern) |
-| Spec review | one Ultra call over the issue + diff | a behaviour the issue states is not implemented, *and* the model's quote of it is found verbatim in the issue |
+| Spec review | one Ultra call over the issue + diff | a behaviour the issue states is not implemented, or the new tests use a look-alike of the issue's own artefact (another exception class than its traceback's, another YAML `kind`, another command), *and* the model's quote of it is found verbatim in the issue |
 
 Inconclusive results (collection errors, timeouts, unquotable claims) are concerns, never proof.
 Checks a repo cannot run are listed as **not verified**, never shown as green. Money / tax /
@@ -63,6 +63,14 @@ within min(20, max turns / 3) extra turns and the same per-issue cost cap. Verif
 the verdict is the last attempt's and says "repro found on retry 1", and the first attempt's
 verdict, candidate and evidence stay as `*.attempt1.*`. A red suite, a regression or an unmet
 spec behaviour never retries.
+
+**Guard on the main behaviour.** The spec review maps each stated behaviour to the new tests
+that exercise it, main behaviour first. When every test mapped to the main behaviour passes on
+the unfixed base (a guard, not a repro) the candidate is at most PASS WITH CONCERNS, even when
+another new test reproduces (E1 checkov-831: a `kind: Pod` test reproduced, the workload test
+was a guard). That verdict takes the same one theater retry, asking for a test of the issue's own
+scenario: if the fix does not handle it, the new test stays red with the fix and the verdict is
+FAIL. PASS WITH CONCERNS never stops best-of-N early, so later candidates still run.
 
 **Best-of-N** (`WARDEN_CANDIDATES=N`, `warden eval --candidates N`; default 1). After one plan,
 the implementer runs up to N times, each candidate on its own fork of the same base checkpoint,

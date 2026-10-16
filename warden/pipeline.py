@@ -384,18 +384,28 @@ def verify_with_retries(
             src = log.artifact_path(name)
             if src.exists():
                 shutil.copyfile(src, log.artifact_path(attempt_name(name, n)))
+        guard = verdict.decision != "FAIL"  # main behaviour tested only by guards
+        what = (
+            "the issue's main behaviour is tested only by guards"
+            if guard
+            else "no new test reproduces the issue on the unfixed base"
+        )
         log.emit(
             "verify",
             "note",
             {
-                "text": f"theater retry {n}/{retries}: no new test reproduces the issue on the "
-                "unfixed base; back to the implementer from the candidate",
+                "text": f"theater retry {n}/{retries}: {what}; back to the implementer from the "
+                "candidate",
                 "retry": "theater",
                 "attempt": n + 1,
                 "theater_tests": dict(verdict.theater_tests),
+                **({"main_guard": list(verdict.main_guard)} if guard else {}),
             },
         )
-        ctx.progress.step(f"theater retry {n}/{retries}: tests pass on the unfixed base")
+        ctx.progress.step(
+            f"theater retry {n}/{retries}: "
+            + ("main-behaviour tests are guards" if guard else "tests pass on the unfixed base")
+        )
         new = steps.retry_fix(ctx, plan, cand, verdict, n)  # reads theater.txt: not yet rerun
         log.artifact(attempt_name("candidate.json", n), cand.model_dump_json(indent=2))
         _write_atomic(log.artifact_path(MARKER["fix"]), new.model_dump_json(indent=2))
