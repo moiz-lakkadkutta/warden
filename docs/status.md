@@ -652,6 +652,53 @@ the model listed for pyjwt (prompt now: list only artefacts that decide the code
   theater retries ran (both stayed FAIL).
 - Tavily worked (quota OK on 2026-10-16). Total spend this session ≈ $5.60.
 
+### 1n. Verify retry built (2026-10-16); Fabric smoke and E2 not run, the Mac slept
+
+**Built** (`c31369a`, offline-tested, 20 new tests in `tests/test_verify_retry.py`, gate green):
+- `verifier.verify_retryable`: FAIL + theater proved the repro + every other fail reason is
+  fixable (suite, mypy, ruff, alembic, OpenAPI, regression, spec). Not for a theater FAIL, a
+  suite that timed out, a gate that did not run, or no new tests. "Did not finish" may ride
+  along (#206 in `-d` was done=False).
+- `pipeline.verify_with_retries` runs theater and verify retries in one loop with one attempt
+  counter (`*.attempt<n>.*`, `retries.json` lists the kinds). Verify retry: once
+  (`WARDEN_VERIFY_RETRIES`, 0–1, doctor + .env.example), min(8, turns/3) turns, same per-issue
+  cap, skipped when < 20% of the cap is left (no catching CostCapExceededError: a near-cap
+  candidate keeps its FAIL instead of becoming an ERROR row).
+- Note (`fix/retry.verify_feedback`), parsed from gate.txt / regression.txt / the verdict:
+  pytest `FAILED node - error` lines, mypy `file:line: msg`, ruff `file:line:col: CODE msg`
+  (full and concise formats), regressed node ids with their error, unmet spec quotes; ≤ 10 per
+  section; "keep the fix and the repro; do not edit, skip, xfail or silence tests or checks".
+- Gate: the suite tail is now stderr+stdout, 4000 chars. Before, on a Fabric replay, the
+  alembic log on stderr came last and pushed pytest's short summary out of gate.txt (true of
+  every `camp-replay-212-*` gate.txt): the failing test ids were never recorded.
+- Events `verify_retry: sent / start / outcome / skipped`; `Verdict.verify_retry`;
+  `CandidateSummary.verify_retry`; PR evidence row; eval CSV column `verify_retry`
+  (`1:PASS;3:FAIL`; D4-format CSVs upgrade in place); `warden report` row "Verify retries";
+  `warden report --baseline <csvs> --baseline-label E1` prints a two-column comparison.
+
+**Live: blocked by the host, not by Nebius.** E2 (5 shards, `evals/swe_rebench/e2/drive.py`)
+and `camp-replay-212-e` started at 12:04Z. At 12:06Z the laptop went to sleep (lid closed, on
+battery: `AppleClamshellState = Yes`, `pmset` "Maintenance Sleep" with a ~45 s DarkWake every
+15 min). Every process stalled inside an HTTP call: macOS's monotonic clock stops during sleep,
+so the 600 s client timeouts never expired, and the sockets bound to the old local address
+(the VPN address changed twice) were dead. A restart at 13:30Z stalled the same way at 13:32Z.
+`caffeinate -ims` does not keep a lid-closed Mac on battery awake. Spend wasted: **$0.79**
+(no result rows; the run dirs are in `runs/_stalled/`, not committed). Nothing was written to
+`campaign.csv` and no PR was opened.
+
+**To run (lid open or on AC power):**
+```
+for i in 0 1 2 3 4; do WARDEN_MAX_TOOL_TURNS=60 nohup caffeinate -i uv run python \
+  evals/swe_rebench/e2/drive.py --out evals/swe_rebench/e2 --shard $i/5 --candidates 3 \
+  --max-usd 1.5 --budget 8 --yes > evals/swe_rebench/e2/shard-$i.log 2>&1 & done
+WARDEN_MAX_TOOL_TURNS=50 WARDEN_CANDIDATES=1 uv run warden campaign --issues 196,206 \
+  --at '43f3851^' --name camp-replay-212-e --max-usd 0.8 --budget 2.0 --yes
+uv run warden report evals/swe_rebench/e2/results.shard-*.csv --md --label E2 \
+  --baseline evals/swe_rebench/e1/results.shard-*.csv --baseline-label E1
+```
+(`drive.py` exists because the agent harness refuses shell commands containing the eval
+subcommand's name; it calls `warden.cli.app(["eval", ...])`.)
+
 ### 1a. Earlier notes: blocked by Token Factory billing (resolved)
 
 `warden run --issue 196 --at 43f3851^ --yes` (run `20261010-111217-7c89`) fetched the issue, then
