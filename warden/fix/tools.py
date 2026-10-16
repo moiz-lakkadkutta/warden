@@ -474,10 +474,14 @@ class ToolDispatcher:
                 child, name, True, f"wrote {len(data)} bytes to {parsed.path}", 0, t0
             )
         if isinstance(parsed, ReplaceInFileArgs):
-            res = box.run(f"cat {shlex.quote(parsed.path)}", cwd=cwd, keep=False)
-            if not res.ok:
-                return self._read(box, name, res, t0)
-            text, err = replace_once(res.stdout, parsed.old, parsed.new)
+            # the whole file (Box.read_bytes): a `cat` is cut at 64 KiB, and writing a cut
+            # read back would truncate the file
+            try:
+                source = box.read_bytes(parsed.path, cwd=cwd).decode("utf-8", errors="replace")
+            except FileNotFoundError:
+                msg = f"cat: {parsed.path}: No such file or directory"
+                return ToolResult(name, False, msg, 1, box, _ms(t0), False)
+            text, err = replace_once(source, parsed.old, parsed.new)
             if err:
                 msg = f"refused: replace_in_file on {parsed.path}: {err}"
                 return ToolResult(name, False, msg, 1, box, _ms(t0), False)
@@ -485,7 +489,7 @@ class ToolDispatcher:
             child = self._copy_in(box, parsed.path, data)
             msg = (
                 f"replaced 1 occurrence in {parsed.path} "
-                f"({len(res.stdout.encode())} → {len(data)} bytes)"
+                f"({len(source.encode())} → {len(data)} bytes)"
             )
             return self._finish(child, name, True, msg, 0, t0)
         if isinstance(parsed, RunShellArgs):

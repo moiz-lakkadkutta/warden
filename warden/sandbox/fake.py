@@ -6,6 +6,7 @@ enough to exercise fork semantics and the theater check without any network.
 
 from __future__ import annotations
 
+import base64
 import itertools
 import posixpath
 import re
@@ -13,6 +14,9 @@ import shlex
 from dataclasses import dataclass, field
 from typing import Any
 
+_READ_CHUNK = re.compile(
+    r"test -f (?P<path>\S+) && tail -c \+(?P<start>\d+) (?P=path) \| head -c (?P<n>\d+) \| base64"
+)
 _KEEP_TAIL = re.compile(
     r"(?P<cmd>.+) > (?P<log>\S+) 2>&1; rc=\$\?; tail -c (?P<n>\d+) (?P=log); exit \$rc", re.S
 )
@@ -33,7 +37,9 @@ class FakeImage:
 
 
 class FakeBackend:
-    def __init__(self) -> None:
+    def __init__(self, *, stdout_cap: int | None = None) -> None:
+        # Contree keeps only the HEAD of long output (65535 bytes); set to reproduce that
+        self.stdout_cap = stdout_cap
         self._ids = itertools.count(1)
         self.images: dict[str, FakeImage] = {}
         self.calls: list[str] = []
@@ -74,9 +80,20 @@ class FakeBackend:
                 path = rel if rel.startswith("/") else f"{cwd.rstrip('/')}/{rel}"
                 child.files[path] = data
         stdout, stderr, code = self._interpret(child, shell, cwd)
+        if self.stdout_cap is not None:
+            stdout = stdout.encode()[: self.stdout_cap].decode(errors="ignore")
         return stdout, stderr, code, (child if keep else None), child.uuid
 
     def _interpret(self, img: FakeImage, shell: str, cwd: str) -> tuple[str, str, int]:
+        chunk = _READ_CHUNK.fullmatch(shell)  # Box.read_bytes
+        if chunk:
+            path = shlex.split(chunk["path"])[0]
+            key = path if path.startswith("/") else f"{cwd.rstrip('/')}/{path}"
+            if key not in img.files:
+                return "", "", 1
+            start = int(chunk["start"]) - 1
+            data = img.files[key][start : start + int(chunk["n"])]
+            return base64.encodebytes(data).decode(), "", 0
         tail = _KEEP_TAIL.fullmatch(shell)  # verify/tail.py: `cmd > log 2>&1; …; tail -c N log`
         if tail:
             out, err, code = self._interpret(img, tail["cmd"], cwd)

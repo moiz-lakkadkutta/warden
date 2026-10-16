@@ -834,7 +834,6 @@ def verify_candidate(
     """Theater check on the base, the gate on the candidate, the regression check (when
     `regression_cmd` is set: the repo's own test command, `-rA` output), the spec review (when
     WARDEN_SPEC_CHECK is on), then the deterministic verdict."""
-    import shlex
 
     from warden.verify.gate import run_gate
     from warden.verify.regression import regression_check
@@ -847,10 +846,7 @@ def verify_candidate(
     theater = None
     if cand.tests_added:
         files = sorted({n.split("::", 1)[0] for n in cand.tests_added})
-        new_tests = {
-            f: candidate.run(f"cat {shlex.quote(f)}", cwd=s.workdir, keep=False).stdout.encode()
-            for f in files
-        }
+        new_tests = {f: candidate.read_bytes(f, cwd=s.workdir) for f in files}  # never a cut cat
         theater = theater_check(
             base,
             new_tests,
