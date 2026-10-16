@@ -155,6 +155,9 @@ class Verdict(BaseModel):
     regressions: list[str] = Field(default_factory=list)
     # behaviours the issue states, quoted, that the diff does not implement (verify/spec.py)
     spec_unmet: list[str] = Field(default_factory=list)
+    # new tests the spec review maps to the issue's main behaviour that all pass on the unfixed
+    # base (guards, not repros): a concern, and a reason for one theater retry
+    main_guard: list[str] = Field(default_factory=list)
     # FAIL only because a check could not finish (suite timed out): unverified, not rejected
     inconclusive: bool = False
     # lines added + removed in the candidate's diff (None: not measured); a best-of-N tiebreak
@@ -176,6 +179,7 @@ class Verdict(BaseModel):
             ("candidates", []),
             ("chosen", None),
             ("theater_retry", 0),
+            ("main_guard", []),
         ):
             if data.get(key) == empty:
                 data.pop(key, None)
@@ -213,12 +217,41 @@ class SpecBehaviour(BaseModel):
         description="yes: the diff implements it; no: it does not; unclear: cannot tell."
     )
     evidence: str = Field(description="The diff lines or test names that decide it.")
+    tests: list[str] = Field(
+        default_factory=list,
+        description="The new tests (names from the New tests list) that exercise this behaviour; "
+        "empty when none does.",
+    )
+
+
+class SpecArtefact(BaseModel):
+    """A concrete thing the issue shows (exception class, YAML kind, command, input) that the
+    evidence test must use; a test of a look-alike proves nothing (E1: pre-commit-1997,
+    checkov-831)."""
+
+    artefact: str = Field(
+        description="The concrete artefact the issue names, e.g. the exception class its "
+        "traceback raises as printed (`requests.exceptions.HTTPError`), the `kind` its YAML uses "
+        "(`kind: StatefulSet`), the command line it runs, the input values it gives."
+    )
+    quote: str = Field(description="The issue's own words or lines showing it, copied verbatim.")
+    used: Literal["yes", "no", "unclear"] = Field(
+        description="yes: a new test exercises this same artefact and the fix handles it; no: "
+        "the tests use a different one of the same sort (another exception class, another kind, "
+        "another command or input) or none; unclear: cannot tell."
+    )
+    evidence: str = Field(description="The test lines that use it, or the look-alike they use.")
 
 
 class SpecReview(BaseModel):
     """The verifier's read of the diff against the issue's stated behaviours."""
 
     behaviours: list[SpecBehaviour]
+    artefacts: list[SpecArtefact] = Field(
+        default_factory=list,
+        description="The issue's concrete artefacts (exception class, YAML kind, command line, "
+        "input values) and whether the new tests use them; empty when the issue names none.",
+    )
     summary: str = Field("", description="One sentence: does the diff do what the issue asks?")
 
 

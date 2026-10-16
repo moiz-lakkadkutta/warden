@@ -1,0 +1,6 @@
+task_id,resolved,verdict,false_pass,false_fail,unverified,theater_catch,tool_turns,usd,seconds,error,candidates,chosen,resolved_candidates
+crate__crate-python-584,0,PASS,1,0,0,0,25,0.0894,206,,3,1,
+pre-commit__pre-commit-1997,1,PASS_WITH_CONCERNS,0,0,0,0,42,0.5382,1839,,3,3,3
+PennyLaneAI__pennylane-5831,1,PASS,0,0,0,0,27,0.1122,189,,3,1,1
+olofk__fusesoc-724,0,FAIL,0,0,0,1,39,0.4568,1140,,3,3,
+gmr__pamqp-52,0,FAIL,0,0,0,0,60,0.7806,869,,3,3,

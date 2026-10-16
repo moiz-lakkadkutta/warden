@@ -1,0 +1,374 @@
+[
+  {
+    "task": "pre-commit__pre-commit-1997",
+    "run": "20261015-090034-6b7d",
+    "old": "PASS_WITH_CONCERNS",
+    "unmet": [
+      "the tests do not use the issue's Exception class: pre_commit.util.CalledProcessError"
+    ],
+    "unclear": [
+      "Handle docker inspect failing (e.g., container not found in outer Docker context) and fall back to returning the original path (quote not found in the issue)",
+      "unclear whether the tests use the issue's Command: docker inspect <container_id> with container_id like 'runner-dmrvfsu-project-35395-concurrent-0'"
+    ],
+    "main_tests": [
+      "test_get_docker_path_docker_inspect_fails"
+    ],
+    "main_guard": [],
+    "artefacts": [
+      {
+        "artefact": "Exception class: pre_commit.util.CalledProcessError",
+        "quote": "pre_commit.util.CalledProcessError: command: ('/usr/bin/docker', 'inspect', 'runner-dmrvfsu-project-35395-concurrent-0')\nreturn code: 1\nexpected return code: 0",
+        "used": "no",
+        "evidence": "The test mocks `docker.cmd_output_b` to raise `subprocess.CalledProcessError` (a different exception class), not `pre_commit.util.CalledProcessError` which is what the real code raises. The fix also catches `subprocess.CalledProcessError`, so it would not handle the actual error."
+      },
+      {
+        "artefact": "Command: docker inspect <container_id> with container_id like 'runner-dmrvfsu-project-35395-concurrent-0'",
+        "quote": "command: ('/usr/bin/docker', 'inspect', 'runner-dmrvfsu-project-35395-concurrent-0')\nstderr:\n    Error: No such object: runner-dmrvfsu-project-35395-concurrent-0",
+        "used": "unclear",
+        "evidence": "The test does not exercise the actual docker inspect command; it mocks `cmd_output_b` entirely. The container ID pattern from the issue is not used in the test."
+      }
+    ]
+  },
+  {
+    "task": "bridgecrewio__checkov-831",
+    "run": "20261014-145856-9a1b",
+    "old": "PASS",
+    "unmet": [
+      "The check should pass when seccompProfile.type is RuntimeDefault for workload resources (e.g., Deployment)",
+      "the tests do not use the issue's kind: Deployment with spec.template.spec.securityContext.seccompProfile.type: RuntimeDefault"
+    ],
+    "unclear": [],
+    "main_tests": [],
+    "main_guard": [],
+    "artefacts": [
+      {
+        "artefact": "kind: Deployment with spec.template.spec.securityContext.seccompProfile.type: RuntimeDefault",
+        "quote": "```yaml\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n....\nspec:\n...\n...\n  template:\n  ...\n  ...\n    spec:\n    ....\n    ....\n      securityContext:\n        allowPrivilegeEscalation: false\n        seccompProfile:\n          type: RuntimeDefault\n```",
+        "used": "no",
+        "evidence": "New tests only use kind: Pod with spec.securityContext.seccompProfile.type (e.g., test_seccomp_runtime_default_passes uses `\"kind\": \"Pod\"` and `\"spec\": {\"securityContext\": {\"seccompProfile\": {\"type\": \"RuntimeDefault\"}}}`). No test uses kind: Deployment or the workload path spec.template.spec.securityContext.seccompProfile.type."
+      },
+      {
+        "artefact": "Check ID: CKV_K8S_31 (Seccomp check)",
+        "quote": "CKV_K8S_31 failure with RuntimeDefault configured for workloads",
+        "used": "yes",
+        "evidence": "The tests exercise the Seccomp check (from checkov.kubernetes.checks.Seccomp import check) which is CKV_K8S_31."
+      }
+    ]
+  },
+  {
+    "task": "asottile__setup-cfg-fmt-41",
+    "run": "20261014-151835-0fb9",
+    "old": "PASS",
+    "unmet": [],
+    "unclear": [],
+    "main_tests": [
+      "test_maintainer_fields_preserved"
+    ],
+    "main_guard": [],
+    "artefacts": [
+      {
+        "artefact": "setup.cfg metadata fields: author, author_email, maintainer, maintainer_email",
+        "quote": "author = Alice\nauthor_email = alice@example.com\nmaintainer = Bob\nmaintainer_email = bob@example.com",
+        "used": "yes",
+        "evidence": "tests/setup_cfg_fmt_test.py:668-695 test_maintainer_fields_preserved writes these exact fields and asserts they remain in the same order after formatting"
+      }
+    ]
+  },
+  {
+    "task": "andialbrecht__sqlparse-231",
+    "run": "20261014-150715-f246",
+    "old": "PASS",
+    "unmet": [],
+    "unclear": [],
+    "main_tests": [
+      "test_function_in_comparison_grouping"
+    ],
+    "main_guard": [],
+    "artefacts": [
+      {
+        "artefact": "SQL input `foo = DATE(bar.baz)`",
+        "quote": "`foo = DATE(bar.baz)`",
+        "used": "yes",
+        "evidence": "tests/test_grouping.py:403-423 uses exactly the string 'foo = DATE(bar.baz)' and asserts it produces a single Comparison token with left=Identifier('foo') and right=Function('DATE(bar.baz)')."
+      }
+    ]
+  },
+  {
+    "task": "PennyLaneAI__pennylane-5831",
+    "run": "20261014-144434-c934",
+    "old": "PASS",
+    "unmet": [],
+    "unclear": [],
+    "main_tests": [
+      "test_simplify_preserves_exp_num_steps"
+    ],
+    "main_guard": [],
+    "artefacts": [
+      {
+        "artefact": "Exp operator created with num_steps=2",
+        "quote": "op1 = qml.exp(qml.Z(0) + 1.2*qml.Z(1), -1.2j, num_steps=2)",
+        "used": "yes",
+        "evidence": "tests/ops/functions/test_simplify.py lines 88-93: test_simplify_preserves_exp_num_steps creates exp_op = qml.exp(base, -1.2j, num_steps=2) and asserts simplified.num_steps == 2"
+      },
+      {
+        "artefact": "qml.simplify function call on Exp operator",
+        "quote": "qml.simplify(op1).num_steps",
+        "used": "yes",
+        "evidence": "tests/ops/functions/test_simplify.py line 91: simplified = qml.simplify(exp_op)"
+      }
+    ]
+  },
+  {
+    "task": "jpadilla__pyjwt-847",
+    "run": "20261014-151403-9a1a",
+    "old": "PASS",
+    "unmet": [],
+    "unclear": [],
+    "main_tests": [
+      "test_decode_with_string_iat_claim"
+    ],
+    "main_guard": [],
+    "artefacts": [
+      {
+        "artefact": "iat claim as a string representing an integer (e.g., '1638202770')",
+        "quote": "payload[\"iat\"] = '1638202770'",
+        "used": "yes",
+        "evidence": "tests/test_api_jwt.py:722 creates payload with `\"iat\": str(now)` where now is an integer timestamp"
+      },
+      {
+        "artefact": "TypeError: '>' not supported between instances of 'str' and 'int' in _validate_iat",
+        "quote": ">       if iat > (now + leeway):\nE       TypeError: '>' not supported between instances of 'str' and 'int'",
+        "used": "yes",
+        "evidence": "The test `test_decode_with_string_iat_claim` exercises the exact code path that previously raised this TypeError and now passes"
+      }
+    ]
+  },
+  {
+    "task": "SpikeInterface__spikeinterface-2775",
+    "run": "20261014-150402-0d83",
+    "old": "PASS",
+    "unmet": [],
+    "unclear": [],
+    "main_tests": [
+      "test_split_into_three_units",
+      "test_split_into_two_units_regression"
+    ],
+    "main_guard": [],
+    "artefacts": [
+      {
+        "artefact": "indices_list with labels [0,0,0,1,1,1,2,2,2,2] for splitting into 3 units",
+        "quote": "indices to split into three groups: 0,0,0,1,1,1,2,2,2,2",
+        "used": "yes",
+        "evidence": "test_split_into_three_units uses indices_list = [np.array([0,0,0,1,1,1,2,2,2,2])]"
+      },
+      {
+        "artefact": "indices_list with labels [0,0,0,0,0,1,1,1,1,1] for splitting into 2 units (regression)",
+        "quote": "indices_list = [np.array([0,0,0,0,0,1,1,1,1,1])]  # five zeros, five ones",
+        "used": "yes",
+        "evidence": "test_split_into_two_units_regression uses indices_list = [np.array([0,0,0,0,0,1,1,1,1,1])]"
+      },
+      {
+        "artefact": "Hardcoded value 2 in self._get_unused_id(2) limiting splits to 2 units",
+        "quote": "new_unit_ids = self._get_unused_id(2)",
+        "used": "yes",
+        "evidence": "Diff shows the hardcoded 2 replaced with dynamic n_new_units computed from indices_list"
+      }
+    ]
+  },
+  {
+    "task": "crate__crate-python-584",
+    "run": "20261015-090036-aeff",
+    "old": "PASS",
+    "unmet": [],
+    "unclear": [],
+    "main_tests": [
+      "test_for_update_clause_omitted"
+    ],
+    "main_guard": [],
+    "artefacts": [
+      {
+        "artefact": "SQLAlchemy SELECT statement with FOR UPDATE clause (via with_for_update())",
+        "quote": "CrateDB does not support `SELECT ... FOR UPDATE` statements",
+        "used": "yes",
+        "evidence": "dialect_test.py: test_for_update_clause_omitted uses sa.select(sa.text('1')).with_for_update() to create the statement"
+      }
+    ]
+  },
+  {
+    "task": "python-cmd2__cmd2-672",
+    "run": "20261015-092425-c082",
+    "old": "PASS",
+    "unmet": [],
+    "unclear": [],
+    "main_tests": [
+      "test_error_prints_only_usage_not_full_help"
+    ],
+    "main_guard": [],
+    "artefacts": [
+      {
+        "artefact": "ACArgumentParser.error() method called on parsing error (missing required argument)",
+        "quote": "One of its behaviors is to print all of the help text when there is a parsing error.",
+        "used": "yes",
+        "evidence": "tests/test_acargparse.py:85-105 test_error_prints_only_usage_not_full_help creates parser with required --foo and positional bar, calls parse_args(['--foo']) missing bar, captures stderr/stdout, asserts 'Error: argument --foo: expected one argument' in output, 'usage:' in output, and 'foo help'/'bar help' NOT in output"
+      }
+    ]
+  },
+  {
+    "task": "MatterMiners__tardis-77",
+    "run": "20261014-143009-d54a",
+    "old": "PASS_WITH_CONCERNS",
+    "unmet": [],
+    "unclear": [],
+    "main_tests": [
+      "tests/configuration_t/test_configuration.py::TestConfiguration::test_hostname_in_config",
+      "tests/plugins_t/test_telegrafmonitoring.py::TestTelegrafMonitoring::test_telegraf_uses_hostname_from_config"
+    ],
+    "main_guard": [],
+    "artefacts": []
+  },
+  {
+    "task": "dask__dask-ml-659",
+    "run": "20261015-090038-b6d8",
+    "old": "PASS",
+    "unmet": [],
+    "unclear": [],
+    "main_tests": [
+      "test_fitted_estimators_tokenize_differently"
+    ],
+    "main_guard": [],
+    "artefacts": [
+      {
+        "artefact": "AssertionError when asserting tokenize(m1) != tokenize(m2) for differently-fitted models",
+        "quote": "AssertionError\n---> 18 assert dask.base.tokenize(m1) != dask.base.tokenize(m2)",
+        "used": "yes",
+        "evidence": "tests/model_selection/test_normalize.py:22 asserts tokenize(est1) != tokenize(est2) after fitting on different data"
+      },
+      {
+        "artefact": "sklearn.linear_model.LogisticRegression estimator",
+        "quote": "import sklearn.linear_model\nm1 = sklearn.linear_model.LogisticRegression(random_state=0)",
+        "used": "yes",
+        "evidence": "tests/model_selection/test_normalize.py:10-11 uses LogisticRegression from sklearn.linear_model"
+      },
+      {
+        "artefact": "sklearn.datasets.make_classification() for generating different training data",
+        "quote": "X1, y1 = sklearn.datasets.make_classification()\nX2, y2 = sklearn.datasets.make_classification()",
+        "used": "yes",
+        "evidence": "tests/model_selection/test_normalize.py:15-18 uses manually created numpy arrays X1,y1,X2,y2 \u2014 different data taking same code path"
+      },
+      {
+        "artefact": "fit(X, y) method call on estimators",
+        "quote": "m1.fit(X1, y1)\nm2.fit(X2, y2)",
+        "used": "yes",
+        "evidence": "tests/model_selection/test_normalize.py:20-21 calls est1.fit(X1, y1) and est2.fit(X2, y2)"
+      },
+      {
+        "artefact": "dask.base.tokenize() function",
+        "quote": "assert dask.base.tokenize(m1) == dask.base.tokenize(m2)\nassert dask.base.tokenize(m1) != dask.base.tokenize(m2)",
+        "used": "yes",
+        "evidence": "tests/model_selection/test_normalize.py:8 imports tokenize from dask.base; lines 13, 22, 26, 45 call tokenize()"
+      },
+      {
+        "artefact": "GridSearchCV.cv_results_ attribute to exclude",
+        "quote": "We might exclude selected attributes like GridSearchCV.cv_results_",
+        "used": "yes",
+        "evidence": "tests/model_selection/test_normalize.py:33-47 creates GridSearchCV, sets different cv_results_, asserts tokens equal"
+      }
+    ]
+  },
+  {
+    "task": "olofk__fusesoc-724",
+    "run": "20261014-152001-10ad",
+    "old": "PASS_WITH_CONCERNS",
+    "unmet": [],
+    "unclear": [],
+    "main_tests": [
+      "test_git_update_with_fixed_version",
+      "test_library_update_with_fixed_sync_version"
+    ],
+    "main_guard": [],
+    "artefacts": [
+      {
+        "artefact": "sync-version flag with tag value (v0.1.3)",
+        "quote": "fusesoc library add https://github.com/fusesoc/fusesoc-generators --sync-version v0.1.3",
+        "used": "yes",
+        "evidence": "Both new tests set sync_version=\"v0.1.3\" on the library and create a git tag v0.1.3 in the test repo."
+      },
+      {
+        "artefact": "git pull command on detached HEAD causing failure",
+        "quote": "\"git -C fusesoc_libraries/fusesoc-generators pull\" exited with an error code",
+        "used": "yes",
+        "evidence": "The fix replaces git pull with git fetch when sync_version is set. Tests verify update_library completes without CalledProcessError."
+      },
+      {
+        "artefact": "fusesoc library update command",
+        "quote": "$ fusesoc library update",
+        "used": "yes",
+        "evidence": "test_library_update_with_fixed_sync_version calls fs.update_libraries([\"testlib\"]) which exercises the full library update flow."
+      }
+    ]
+  },
+  {
+    "task": "python-wheel-build__fromager-352",
+    "run": "20261014-185854-9990",
+    "old": "PASS",
+    "unmet": [],
+    "unclear": [],
+    "main_tests": [
+      "test_global_changelog_setting"
+    ],
+    "main_guard": [
+      "tests/test_settings.py::test_global_changelog_setting"
+    ],
+    "artefacts": [
+      {
+        "artefact": "global_changelog YAML setting with version-keyed entries",
+        "quote": "global_changelog:\n  \"1.0\":\n    - \"initial release\"",
+        "used": "yes",
+        "evidence": "tests/test_settings.py::test_global_changelog_setting uses global_changelog with \"1.0\" key; tests/test_settings.py::test_global_changelog_triggers_rebuild uses same structure"
+      },
+      {
+        "artefact": "Multiple packages (foo, bar) with no package-specific changelog",
+        "quote": "packages:\n  foo: {}\n  bar: {}",
+        "used": "yes",
+        "evidence": "tests/test_settings.py::test_global_changelog_triggers_rebuild defines packages foo and bar with empty config, then calls build_tag on both"
+      },
+      {
+        "artefact": "Version \"1.0\" as the trigger version for global changelog",
+        "quote": "\"1.0\":\n    - \"some change\"",
+        "used": "yes",
+        "evidence": "tests/test_settings.py::test_global_changelog_triggers_rebuild calls s.build_tag(\"foo\", \"1.0\") and s.build_tag(\"bar\", \"1.0\")"
+      }
+    ]
+  },
+  {
+    "task": "aio-libs__yarl-959",
+    "run": "20261014-150042-cdcb",
+    "old": "PASS",
+    "unmet": [],
+    "unclear": [],
+    "main_tests": [
+      "test_build_with_empty_port"
+    ],
+    "main_guard": [],
+    "artefacts": [
+      {
+        "artefact": "URL.build call with port=\"\"",
+        "quote": "u = yarl.URL.build(scheme=\"http\", host=\"api.com\", port=\"\", path=\"/v1\")",
+        "used": "yes",
+        "evidence": "tests/test_url_build.py::test_build_with_empty_port uses exactly `URL.build(scheme=\"http\", host=\"api.com\", port=\"\", path=\"/v1\")` and asserts `str(u) == \"http://api.com/v1\"`"
+      },
+      {
+        "artefact": "Expected URL string without port",
+        "quote": "assert str(u) == \"http://api.com/v1\", str(u)",
+        "used": "yes",
+        "evidence": "tests/test_url_build.py::test_build_with_empty_port asserts `str(u) == \"http://api.com/v1\"`"
+      },
+      {
+        "artefact": "Buggy URL string with empty port",
+        "quote": "AssertionError: http://api.com:/v1",
+        "used": "yes",
+        "evidence": "The test would fail with the buggy output `http://api.com:/v1`; the fix makes it pass"
+      }
+    ]
+  }
+]

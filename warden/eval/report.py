@@ -114,6 +114,8 @@ class Metrics:
     median_seconds: float
     mean_turns: float
     excluded: dict[str, str] = field(default_factory=dict)
+    clean_passes: int = 0  # PASS without concerns
+    clean_pass_resolved: int = 0
 
     @property
     def resolved_pct(self) -> float:
@@ -157,6 +159,8 @@ def compute(rows: list[Result], *, excluded: dict[str, str] | None = None) -> Me
         median_seconds=statistics.median(r.seconds for r in counted) if counted else 0.0,
         mean_turns=statistics.fmean(r.tool_turns for r in ran) if ran else 0.0,
         excluded={k: v for k, v in excluded.items()},
+        clean_passes=sum(r.verdict == "PASS" for r in counted),
+        clean_pass_resolved=sum(r.verdict == "PASS" and r.resolved for r in counted),
     )
 
 
@@ -181,6 +185,12 @@ def markdown(m: Metrics, *, label: str = "results") -> str:
             "Verifier PASS precision (PASS the hidden tests accept)",
             f"{m.pass_resolved} of {m.passes} PASS" + (
                 f" ({_pct(m.pass_precision)})" if m.passes else ""
+            ),
+        ),
+        (
+            "Clean PASS precision (PASS without concerns)",
+            f"{m.clean_pass_resolved} of {m.clean_passes} PASS" + (
+                f" ({_pct(m.clean_pass_resolved / m.clean_passes)})" if m.clean_passes else ""
             ),
         ),
         ("Verifier PASS that hidden tests reject (false PASS)",

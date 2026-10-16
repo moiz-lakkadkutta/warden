@@ -117,6 +117,15 @@ Every entry: date · tool · what happened · numbers · what would have helped.
   reproduction latency. Upside worth noting: the whole hunt is **$0 of Token Factory spend** (the
   probe is deterministic; Lightning is optional and was not needed), so Sandboxes carried the
   entire discovery phase alone.
+- 2026-10-16 · runtime · The silent **65,535-byte** stdout cap (above) hit again, this time in
+  reading *files*: `cat tests/test_frame_unmarshaling.py` on gmr__pamqp-52 returned 65,535 of
+  65,709 bytes. Warden copied that cut file onto a candidate for its regression check, got a
+  SyntaxError, counted 237 "regressions", and ranked the only candidate the hidden tests accept
+  last (E1's one wrong best-of-N pick). The same cut hit `replace_in_file` on any file over
+  64 KiB (it wrote the cut read back). Workaround: read files as base64 chunks of 40 kB
+  (sha256 matches) and restore files with `git checkout` inside the sandbox. → a `read_file` /
+  `download` call in the SDK, or the `truncated` flag asked for above, would have made both
+  bugs visible on day one.
 
 ## Token Factory inference
 

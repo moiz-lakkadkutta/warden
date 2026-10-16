@@ -110,6 +110,30 @@ def test_replace_in_file_unique_match_forks(log: EventLog) -> None:
     assert backend.images[box.uuid].files["/app/src/exp.py"] == BIG.encode()
 
 
+HUGE = "".join(f"def g{i}():\n    return {i}\n" for i in range(6000))  # ~150 kB
+
+
+def test_replace_in_file_on_a_file_past_the_64k_output_cap_keeps_the_whole_file(
+    log: EventLog,
+) -> None:
+    """Contree keeps only the first 64 KiB of stdout: a `cat`-based replace wrote the cut
+    read back, truncating any file over the cap."""
+    backend = FakeBackend(stdout_cap=65535)
+    box = Box.from_ref(backend, "warden/fabric-base:latest", log)
+    backend.images[box.uuid].files["/app/src/big.py"] = HUGE.encode()
+    assert len(box.run("cat src/big.py", keep=False).stdout) == 65535  # the cap is real
+    old = "def g5999():\n    return 5999\n"  # past the cap
+    res = ToolDispatcher(log).dispatch(
+        box, "replace_in_file", {"path": "src/big.py", "old": old, "new": FRAGMENT}
+    )
+    assert res.ok, res.output
+    after = backend.images[res.box.uuid].files["/app/src/big.py"].decode()
+    assert after == HUGE.replace(old, FRAGMENT)
+    assert box.read_bytes("src/big.py") == HUGE.encode()
+    with pytest.raises(FileNotFoundError):
+        box.read_bytes("src/missing.py")
+
+
 @pytest.mark.parametrize(
     ("old", "expect"),
     [

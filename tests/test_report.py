@@ -102,6 +102,25 @@ def test_markdown_table(shards: list[Path]) -> None:
     assert any("Excluded" in line and "1" in line for line in lines)
 
 
+def test_clean_pass_precision_leaves_out_pass_with_concerns(tmp_path: Path) -> None:
+    rows = report.read_results(
+        [
+            _write(
+                tmp_path / "r.csv",
+                NEW
+                + "a__a-1,1,PASS,0,0,0,0,10,0.1,100,\n"
+                + "b__b-2,0,PASS_WITH_CONCERNS,1,0,0,0,10,0.1,100,\n"
+                + "c__c-3,0,PASS,1,0,0,0,10,0.1,100,\n",
+            )
+        ]
+    )
+    m = report.compute(rows)
+    assert (m.passes, m.pass_resolved, m.clean_passes, m.clean_pass_resolved) == (3, 1, 2, 1)
+    assert "| Clean PASS precision (PASS without concerns) | 1 of 2 PASS (50%) |" in (
+        report.markdown(m)
+    )
+
+
 def test_replace_between_markers() -> None:
     text = "intro\n<!-- results:start -->\nold\n<!-- results:end -->\nouter\n"
     out = report.replace_block(text, "| new |\n")

@@ -181,6 +181,20 @@ def test_why_names_the_first_criterion_that_separated_each_loser() -> None:
     assert "#4 not run (early stop: #2 is a clean PASS)" in why
 
 
+def test_an_empty_diff_never_outranks_a_candidate_that_changed_the_code() -> None:
+    """E1 gmr__pamqp-52: #1 and #3 changed nothing (FAIL, 1 unmet spec behaviour each); #2 is a
+    2-line fix the hidden tests accept (FAIL on a broken regression copy). #3 was chosen."""
+    c1 = _s(1, "FAIL", spec_unmet=1, concerns=1, diff_lines=0, cost_usd=0.31)
+    c2 = _s(2, "FAIL", regressions=237, diff_lines=2, cost_usd=0.31)
+    c3 = _s(3, "FAIL", spec_unmet=1, concerns=1, diff_lines=0, cost_usd=0.24)
+    assert min([c1, c2, c3], key=rank_key) is c2
+    why = why_chosen(c2, [c1, c3])
+    assert "over #1 on a change (2 lines vs none)" in why
+    # a change never beats a better verdict, and an unmeasured diff is not "empty"
+    assert rank_key(_s(4, "PASS_WITH_CONCERNS", diff_lines=0)) < rank_key(c2)
+    assert rank_key(_s(5, "FAIL", diff_lines=None)) < rank_key(c1)
+
+
 # ------------------------------------------------------------------------------- machine
 
 

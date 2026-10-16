@@ -24,6 +24,35 @@ from warden.verify.spec import SpecResult
 from warden.verify.theater import TheaterResult
 
 THEATER_PASSED = "a new test fails on the unfixed base (theater check)"
+MAIN_GUARD = "the issue's main behaviour is tested only by a guard (passes on the unfixed base)"
+
+
+def _leaf(name: str) -> str:
+    """`a/t.py::C::test_x[p]` → `test_x`; a file target stays itself."""
+    return name.rsplit("::", 1)[-1].split("[", 1)[0] if "::" in name else name
+
+
+def _maps(test: str, node: str) -> bool:
+    """Does the spec review's test name (`t.py::test_x`, `test_x`, a file) name theater node?"""
+    test = test.strip()
+    if not test:
+        return False
+    if node == test or node.startswith((f"{test}::", f"{test}[")) or node.endswith(f"/{test}"):
+        return True
+    if "::" not in test and test.endswith(".py"):  # a file: every node under it
+        return node.split("::", 1)[0].endswith(test)
+    return "::" in node and _leaf(node) == _leaf(test.rsplit("/", 1)[-1])
+
+
+def main_guard(main_tests: list[str], theater_tests: dict[str, str]) -> list[str]:
+    """The theater nodes mapped to the issue's main behaviour, when every one of them is a guard
+    (passes on the unfixed base); [] when one reproduces, or nothing maps (no claim either way).
+    E1 checkov-831: a `kind: Pod` test reproduced, while the test of the issue's own scenario
+    passed on base, and the PASS was false."""
+    nodes = [n for n in theater_tests if any(_maps(t, n) for t in main_tests)]
+    if not nodes or not all(theater_tests[n].startswith("guard") for n in nodes):
+        return []
+    return nodes
 
 
 def decide(
@@ -101,6 +130,9 @@ def decide(
             passed.append(f"spec: {spec.label}")
         if spec.unclear:
             concerns.append(f"spec unclear: {'; '.join(spec.unclear[:5])}")
+    guards = main_guard(spec.main_tests, theater.reasons) if spec and theater else []
+    if guards:
+        concerns.append(f"{MAIN_GUARD}: {', '.join(guards[:4])}")
 
     fail_all = fail + unverified
     decision = "FAIL" if fail_all else ("PASS_WITH_CONCERNS" if concerns else "PASS")
@@ -120,6 +152,7 @@ def decide(
         reasons=fail_all + passed if fail_all else passed,
         regressions=list(regression.broken) if regression else [],
         spec_unmet=list(spec.unmet) if spec else [],
+        main_guard=guards,
         inconclusive=bool(unverified) and not fail,
     )
 
@@ -129,9 +162,16 @@ def theater_retryable(cand: Candidate, v: Verdict) -> bool:
     unfixed base (all pass there, or red only for the wrong reason / still red with the fix),
     while the implementer finished and everything else is green. Only then can the fix be kept
     and the tests rewritten. A red suite is allowed when the new tests that stay red with the
-    fix account for every failure (they are the invalid repro, not a broken fix)."""
-    if v.decision != "FAIL" or cand.done is False or not cand.tests_added:
+    fix account for every failure (they are the invalid repro, not a broken fix).
+
+    Also a non-FAIL verdict whose main-behaviour tests are all guards (`main_guard`): the fix
+    may be right, but nothing shows it on the issue's own scenario, so the implementer gets the
+    same one retry to write that test. If the fix does not handle the scenario, the new test
+    stays red with the fix (invalid repro → FAIL) instead of hiding behind a look-alike repro."""
+    if cand.done is False or not cand.tests_added:
         return False
+    if v.decision != "FAIL":
+        return bool(v.main_guard)
     if v.theater_failed_on_base or v.theater_inconclusive or v.inconclusive or not v.theater_tests:
         return False
     red_new = sum(

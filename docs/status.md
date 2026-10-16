@@ -596,6 +596,62 @@ Branch `fix/b3-implementer-finish` (worktree), commits `9524ab7` `89854a6` `7233
 theater retry) for candidates with a valid repro (#196, #206 here). Try Super at a higher temperature,
 since 0.1 may feed the repetition. Run best-of-N only with edit mode on.
 
+### 1m. Verifier precision fixes + E1-precision re-run (2026-10-16): PASS precision 29% → 62% on the same 15
+
+Four fixes, each with unit tests (fake sandbox / recorded fixtures):
+- `fix(D4)` 68eeb9c: **pamqp's wrong pick had a real cause.** The regression check copied base
+  test files through `cat`; Contree cuts stdout at 65,535 bytes, so the 65,709-byte
+  `tests/test_frame_unmarshaling.py` arrived cut, a SyntaxError that read as 237 regressions on the
+  2-line fix the hidden tests accept. Files are now restored with `git checkout -q HEAD -- …` on a
+  fork of the candidate (a failed restore is inconclusive). Ranking: an empty diff now sorts after
+  any candidate that changed code, within a verdict tier (FAIL already never outranked a non-FAIL;
+  #1 and #3 were empty-diff FAILs with 1 unmet spec behaviour, which beat 237 "regressions").
+- `fix(D3)` 5adc921: spec review lists the issue's concrete **artefacts** (exception class as
+  printed, YAML `kind`, command line, inputs that decide the code path); a quoted "not used" is
+  unmet → FAIL. Quotes may elide with `...`. Prompt examples deliberately differ from the two E1
+  cases (HTTPError / StatefulSet), so the re-run is not answered by the prompt text.
+- `feat(C1)` 9d525f9: **guard on the main behaviour.** Each spec behaviour names its tests (main
+  first). If every test mapped to the main behaviour is a guard (passes on base), PASS →
+  PASS_WITH_CONCERNS (`Verdict.main_guard`) *and* the existing one theater retry runs with a
+  "test the issue's own scenario" note. Chosen because a concern alone does not change outcomes
+  (the report counts PWC as PASS), the retry machinery already exists, and PWC disables the
+  best-of-N early stop so later candidates still run.
+- `fix(B3)` c896a3f: the same 64 KiB cut hit `replace_in_file` (wrote the cut read back, truncating
+  any file >64 KiB) and the theater copy of new test files. `Box.read_bytes` reads base64 chunks
+  of 40 kB; live check on the pamqp file matched sha256 (cat: 65,535 of 65,709 bytes).
+- `feat(D3)` 79dd2f2: `warden report` adds "Clean PASS precision (PASS without concerns)".
+
+**Verifier-only replay** (`evals/swe_rebench/e1-precision/spec_replay.{py,json}`): the new spec
+review on E1's own chosen candidates (diffs regenerated from their images, 14 Ultra calls,
+~$0.06): pre-commit-1997 and checkov-831 → unmet; the 4 correct PASSes stay met; the 8
+under-specified false PASSes unchanged (fromager-352 would be flagged `main_guard`). First try
+needed two tweaks: an elided YAML quote (checkov) and an "incidental" RS256/audience artefact that
+the model listed for pyjwt (prompt now: list only artefacts that decide the code path).
+
+**Live re-run** `evals/swe_rebench/e1-precision/` (15 tasks: E1's 14 PASS + pamqp; same settings:
+3 candidates, $1.50 cap, 60 tool turns; 3 shards × $5 budget; driver calls the CLI entry point):
+
+| | E1 (same 15) | E1 + fixes |
+|---|---|---|
+| Resolved | 4/15 | 5/15 |
+| PASS precision | 4/14 (29%) | **5/8 (62%)** |
+| Clean PASS precision | 4/11 (36%) | 4/7 (57%) |
+| False PASS | 10 | 3 (crate, yarl, fromager) |
+| False FAIL | 0/1 | 0/7 |
+| Cost | $4.55 | $5.54 |
+
+- Gained: pre-commit (FAIL, FAIL on artefacts + theater → #3 resolves, PWC), checkov (Deployment
+  test, PASS, resolves).
+- Kept: sqlparse, pennylane, pyjwt. **Lost: setup-cfg-fmt-41**, by the implementer: all 3
+  candidates hit 60 turns (99 unchanged re-read notes), none resolves; FAIL is correct.
+- spikeinterface, cmd2, tardis, dask-ml, fusesoc: false PASS → FAIL, no candidate resolves.
+- pamqp: all 3 candidates empty diffs at 60 turns this time; FAIL, none resolves. The ranking fix
+  is covered by a unit test on E1's recorded candidate summaries.
+- fromager: the main behaviour mapped to [guard, repro], so no `main_guard`; still a false PASS
+  (under-specified `build_tag`/changelog API). The guard rule never fired live; 2 ordinary
+  theater retries ran (both stayed FAIL).
+- Tavily worked (quota OK on 2026-10-16). Total spend this session ≈ $5.60.
+
 ### 1a. Earlier notes: blocked by Token Factory billing (resolved)
 
 `warden run --issue 196 --at 43f3851^ --yes` (run `20261010-111217-7c89`) fetched the issue, then

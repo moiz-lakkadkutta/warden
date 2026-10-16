@@ -1,0 +1,6 @@
+task_id,resolved,verdict,false_pass,false_fail,unverified,theater_catch,tool_turns,usd,seconds,error,candidates,chosen,resolved_candidates
+SpikeInterface__spikeinterface-2775,0,FAIL,0,0,0,0,60,0.5424,1266,,3,3,
+python-cmd2__cmd2-672,0,FAIL,0,0,0,0,60,0.5453,899,,3,2,
+MatterMiners__tardis-77,0,FAIL,0,0,0,0,60,0.5665,1618,,3,3,
+bridgecrewio__checkov-831,1,PASS,0,0,0,0,19,0.0675,249,,3,1,1
+python-wheel-build__fromager-352,0,PASS,1,0,0,0,11,0.0526,217,,3,1,

@@ -31,8 +31,10 @@ class ShellStub:
     def run(
         self, image: Any, *, shell: str, cwd: str, keep: bool, files: Any = None, **kw: Any
     ) -> Any:
-        self.runs.append({"image": image, "shell": shell, "cwd": cwd, "files": files, **kw})
-        if files is not None:
+        self.runs.append(
+            {"image": image, "shell": shell, "cwd": cwd, "files": files, "keep": keep, **kw}
+        )
+        if files is not None or (keep and "git checkout" in shell):
             return "", "", 0, f"{image}+t", f"{image}+t"
         for img, needle, out, code in self.rules:
             if str(image).startswith(img) and needle in shell:
@@ -173,9 +175,10 @@ def test_a_test_green_on_base_and_red_on_candidate_is_a_regression(tmp_path: Pat
     assert res.broken == []
     assert res.changed_expectations == [f"{T1}::T::test_notify"]
     assert res.inconclusive is False
-    # the base's own files are copied onto the candidate: an edited test cannot hide a regression
-    copy = next(r for r in stub.runs if r["files"] is not None)
-    assert copy["image"] == "cand" and set(copy["files"]) == {T1, T2}
+    # the base's own files are restored on the candidate: an edited test cannot hide a regression
+    restore = next(r for r in stub.runs if "git checkout" in r["shell"])
+    assert restore["image"] == "cand" and restore["keep"] is True
+    assert restore["shell"] == f"git checkout -q HEAD -- {T1} {T2}"
     pytest_runs = [r for r in stub.runs if "pytest" in r["shell"]]
     assert all(r["shell"].startswith("testbed-env sh -c '") for r in pytest_runs)
     assert all("; exit $rc'" in r["shell"] for r in pytest_runs)  # their tails are kept
@@ -261,3 +264,31 @@ def test_db_prefix_is_prepended_to_both_runs(tmp_path: Path) -> None:
     pytest_runs = [r for r in stub.runs if "pytest" in r["shell"]]
     assert len(pytest_runs) == 2
     assert all("PFX_SENTINEL &&" in r["shell"] for r in pytest_runs)
+
+
+def test_base_test_files_are_restored_from_git_never_read_through_stdout(tmp_path: Path) -> None:
+    """E1 gmr__pamqp-52: `cat` of a 1700-line test file came back cut at the sandbox's 64 KiB
+    output cap; copied onto the candidate it was a SyntaxError that read as 237 regressions."""
+    out = f"PASSED {T1}::T::test_notify\nPASSED {T1}::T::test_init\nFAILED {T2}::test_old\n"
+    stub = ShellStub(_rules(out))
+    base, cand = _boxes(tmp_path, stub)
+    res = regression_check(base, cand, test_cmd=CMD, cwd="/testbed")
+    assert res.broken == [] and not res.inconclusive
+    assert not any(r["shell"].startswith("cat ") for r in stub.runs)
+    assert not any(r["files"] for r in stub.runs)
+    probe_runs = [r for r in stub.runs if r["image"] == "cand+t"]
+    assert probe_runs and all("pytest" in r["shell"] for r in probe_runs)
+
+
+class _NoRestore(ShellStub):
+    def run(self, image: Any, *, shell: str, cwd: str, keep: bool, **kw: Any) -> Any:
+        if "git checkout" in shell:
+            self.runs.append({"image": image, "shell": shell, "cwd": cwd, "files": None})
+            return "", "error: pathspec", 1, None, ""
+        return super().run(image, shell=shell, cwd=cwd, keep=keep, **kw)
+
+
+def test_a_failed_restore_is_inconclusive_not_a_regression(tmp_path: Path) -> None:
+    base, cand = _boxes(tmp_path, _NoRestore(_rules("")))
+    res = regression_check(base, cand, test_cmd=CMD, cwd="/testbed")
+    assert res.ran and res.inconclusive and res.broken == []

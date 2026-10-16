@@ -9,6 +9,8 @@ The Contree SDK is imported lazily and wrapped behind `SandboxBackend` so tests 
 
 from __future__ import annotations
 
+import base64
+import shlex
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -55,6 +57,7 @@ class SandboxBackend(Protocol):
 
 
 TIMEOUT_EXIT = 124
+READ_CHUNK = 40_000  # raw bytes per read_bytes run: base64 + newlines stays under 64 KiB
 # Sandboxes API 5xx, or a poll that timed out / lost its connection: retry the whole run (each run
 # is a new fork) this many times, backing off.
 SERVER_ERROR_RETRIES = 2
@@ -196,6 +199,22 @@ class Box:
         if res.box is None:
             raise RuntimeError("copy_in produced no checkpoint")
         return res.box
+
+    def read_bytes(self, path: str, *, cwd: str = "/app") -> bytes:
+        """The whole file, exactly. Never a bare `cat`: the sandbox keeps only the first 64 KiB
+        of stdout (E1 gmr__pamqp-52: a cut 1700-line test file). Reads base64 chunks of
+        READ_CHUNK bytes (~54 KB encoded, under the cap); one run for a file under the chunk."""
+        q = shlex.quote(path)
+        out = bytearray()
+        while True:
+            shell = f"test -f {q} && tail -c +{len(out) + 1} {q} | head -c {READ_CHUNK} | base64"
+            res = self.run(shell, cwd=cwd, keep=False)
+            if not res.ok:
+                raise FileNotFoundError(f"{path}: {res.stderr.strip() or 'not a file'}")
+            chunk = base64.b64decode("".join(res.stdout.split()))
+            out += chunk
+            if len(chunk) < READ_CHUNK:
+                return bytes(out)
 
     def read_file(self, path: str) -> str:
         res = self.run(f"cat {path}", keep=False)

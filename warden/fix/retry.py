@@ -44,12 +44,27 @@ def feedback(
     """The user note for retry `attempt` of `retries`: what the verifier saw, what to do."""
     per_test = "\n".join(f"- {node}: {why}" for node, why in verdict.theater_tests.items())
     why = next((r for r in verdict.reasons if r.startswith("theater:")), "theater check failed")
+    if verdict.decision != "FAIL" and verdict.main_guard:
+        intro = (
+            "You already finished this issue once and your fix is in this working copy. The "
+            "verifier did not accept the evidence: the tests for the issue's MAIN behaviour ("
+            + ", ".join(verdict.main_guard[:4])
+            + ") pass on the unfixed code, so they are guards, not a reproduction; whatever "
+            "test does fail on the unfixed code exercises something else. Write a test of the "
+            "issue's own scenario — its exact inputs, the exception class its traceback shows, "
+            "the YAML kind / command line it uses — that FAILS on the unfixed code and PASSES "
+            "with your fix. If it still fails with your fix, the fix is incomplete: fix the code."
+        )
+    else:
+        intro = (
+            "You already finished this issue once and your fix is in this working copy. The "
+            f"verifier rejected the candidate for one reason only: {why}. A new test must FAIL "
+            "on the unfixed code, on an assertion about the behaviour the issue describes, and "
+            "PASS with your fix; none of yours does, so nothing proves the fix."
+        )
     parts = [
         f"## Verifier feedback — theater retry {attempt} of {retries}",
-        "You already finished this issue once and your fix is in this working copy. The verifier "
-        f"rejected the candidate for one reason only: {why}. A new test must FAIL on the unfixed "
-        "code, on an assertion about the behaviour the issue describes, and PASS with your fix; "
-        "none of yours does, so nothing proves the fix.",
+        intro,
         f"Your new tests on the unfixed base:\n{per_test or '- (no per-test results)'}",
     ]
     if base_output.strip():

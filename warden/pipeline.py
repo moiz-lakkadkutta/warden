@@ -399,18 +399,28 @@ def verify_with_retries(
             src = log.artifact_path(name)
             if src.exists():
                 shutil.copyfile(src, log.artifact_path(attempt_name(name, n)))
+        guard = verdict.decision != "FAIL"  # main behaviour tested only by guards
+        what = (
+            "the issue's main behaviour is tested only by guards"
+            if guard
+            else "no new test reproduces the issue on the unfixed base"
+        )
         log.emit(
             "verify",
             "note",
             {
-                "text": f"theater retry {n}/{retries}: no new test reproduces the issue on the "
-                "unfixed base; back to the implementer from the candidate",
+                "text": f"theater retry {n}/{retries}: {what}; back to the implementer from the "
+                "candidate",
                 "retry": "theater",
                 "attempt": n + 1,
                 "theater_tests": dict(verdict.theater_tests),
+                **({"main_guard": list(verdict.main_guard)} if guard else {}),
             },
         )
-        ctx.progress.step(f"theater retry {n}/{retries}: tests pass on the unfixed base")
+        ctx.progress.step(
+            f"theater retry {n}/{retries}: "
+            + ("main-behaviour tests are guards" if guard else "tests pass on the unfixed base")
+        )
         new = steps.retry_fix(ctx, plan, cand, verdict, n)  # reads theater.txt: not yet rerun
         log.artifact(attempt_name("candidate.json", n), cand.model_dump_json(indent=2))
         _write_atomic(log.artifact_path(MARKER["fix"]), new.model_dump_json(indent=2))
@@ -441,12 +451,14 @@ BEST_OF_N = "best_of_n.json"  # the winner's Verdict with every candidate listed
 TEMPERATURES = (0.1, 0.5, 0.8)  # candidate 1 keeps the single-run default; later ones reuse 0.8
 _TIERS = {"PASS": 0, "PASS_WITH_CONCERNS": 1, "FAIL": 2}
 RANK_RULE = (
-    "verdict (PASS > PASS_WITH_CONCERNS > inconclusive FAIL > FAIL), then a new test that failed "
-    "on the unfixed base, then fewer regressions + unmet spec behaviours, then fewer concerns, "
-    "then a smaller diff, then lower cost, then the earlier candidate"
+    "verdict (PASS > PASS_WITH_CONCERNS > inconclusive FAIL > FAIL), then a candidate that changed "
+    "the code over an empty diff, then a new test that failed on the unfixed base, then fewer "
+    "regressions + unmet spec behaviours, then fewer concerns, then a smaller diff, then lower "
+    "cost, then the earlier candidate"
 )
 _CRITERIA = (
     "verdict",
+    "a change",
     "theater",
     "regressions + unmet spec",
     "concerns",
@@ -460,15 +472,19 @@ def candidate_temperature(k: int) -> float:
     return TEMPERATURES[min(max(k, 1), len(TEMPERATURES)) - 1]
 
 
-def rank_key(c: CandidateSummary) -> tuple[int, int, int, int, int, float, int]:
+def rank_key(c: CandidateSummary) -> tuple[int, int, int, int, int, int, float, int]:
     """Best-of-N order, lowest first (RANK_RULE). A skipped candidate sorts after every
-    verified one; an unmeasured diff after every measured one."""
+    verified one; an unmeasured diff after every measured one. An empty diff (0 lines: the
+    implementer changed nothing) sorts after every candidate that changed the code: it cannot
+    fix anything, and on gmr__pamqp-52 (E1) two empty FAILs, with 1 unmet spec behaviour each,
+    otherwise outranked a 2-line fix the hidden tests accept."""
     if c.status != "verified" or c.decision is None:
         tier = 9
     else:
         tier = _TIERS[c.decision] + (1 if c.decision == "FAIL" and not c.inconclusive else 0)
     return (
         tier,
+        1 if c.diff_lines == 0 else 0,
         0 if c.theater_failed_on_base else 1,
         c.regressions + c.spec_unmet,
         c.concerns,
@@ -497,13 +513,15 @@ def why_chosen(winner: CandidateSummary, others: list[CandidateSummary]) -> str:
         if i == 0:
             detail = f"{_label(winner)} vs {_label(o)}"
         elif i == 1:
+            detail = f"{winner.diff_lines if winner.diff_lines is not None else '?'} lines vs none"
+        elif i == 2:
             detail = "its new test fails on the unfixed base"
-        elif i == 4:
+        elif i == 5:
             other = o.diff_lines if o.diff_lines is not None else "?"
             detail = f"{winner.diff_lines} vs {other} lines"
-        elif i == 5:
-            detail = f"${winner.cost_usd:.2f} vs ${o.cost_usd:.2f}"
         elif i == 6:
+            detail = f"${winner.cost_usd:.2f} vs ${o.cost_usd:.2f}"
+        elif i == 7:
             detail = "a tie; the earlier one"
         else:
             detail = f"{wk[i]} vs {ok[i]}"
@@ -831,7 +849,6 @@ def verify_candidate(
     """Theater check on the base, the gate on the candidate, the regression check (when
     `regression_cmd` is set: the repo's own test command, `-rA` output), the spec review (when
     WARDEN_SPEC_CHECK is on), then the deterministic verdict."""
-    import shlex
 
     from warden.verify.gate import run_gate
     from warden.verify.regression import regression_check
@@ -851,10 +868,7 @@ def verify_candidate(
     theater = None
     if cand.tests_added:
         files = sorted({n.split("::", 1)[0] for n in cand.tests_added})
-        new_tests = {
-            f: candidate.run(f"cat {shlex.quote(f)}", cwd=s.workdir, keep=False).stdout.encode()
-            for f in files
-        }
+        new_tests = {f: candidate.read_bytes(f, cwd=s.workdir) for f in files}  # never a cut cat
         theater = theater_check(
             base,
             new_tests,
