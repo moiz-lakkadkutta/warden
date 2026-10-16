@@ -2,19 +2,35 @@
 
 **Hunt → Plan → Fix → Verify → PR.** An autonomous coding agent that fixes an issue test-first in
 a forked Nebius Sandbox, then has a second, adversarial pass prove the new tests are real, the old
-tests still pass, and the diff does what the issue says, before a draft PR is opened. It runs on
-**Nebius Token Factory Sandboxes** with **NVIDIA Nemotron 3 Ultra / Super / 3.5 Lightning**.
+tests still pass, and the diff does what the issue says, before a draft PR is opened.
+
+![warden doctor, warden run --demo and warden console in a terminal with no credentials](docs/demo/hero.gif)
 
 ```bash
-uvx warden doctor            # checks tools + keys, no network
-uvx warden run --demo        # the whole loop on a fake sandbox, no credentials, ~2 s
-uvx warden console           # the run's timeline + evidence table
+uv tool install git+https://github.com/moiz-lakkadkutta/warden   # not on PyPI: `warden` there is another project
+warden doctor          # checks tools + keys, no network
+warden run --demo      # the whole loop on a fake sandbox, no credentials, a few seconds
+warden console         # the run's timeline, branch tree and evidence table as one HTML page
 ```
 
-**Live console** (Nebius Serverless AI endpoint):
-<https://port8080-cs9x5ndsvxz54x7.tunnel.applications.eu-west2.nebius.cloud/> · an example run
-with its branch tree:
-<https://port8080-cs9x5ndsvxz54x7.tunnel.applications.eu-west2.nebius.cloud/20261010-111217-7c89/>
+**Live console** on a Nebius Serverless AI endpoint:
+<https://port8080-cs9x5ndsvxz54x7.tunnel.applications.eu-west2.nebius.cloud/> · the run behind
+draft PR #221, with its branch tree:
+<https://port8080-cs9x5ndsvxz54x7.tunnel.applications.eu-west2.nebius.cloud/20261010-123442-279b/>
+
+**Headline numbers** (real runs; details and sources below):
+
+| Measure | Result |
+|---|---|
+| SWE-rebench, 49 graded tasks, hidden tests Warden never sees | **11 / 49 resolved** (22%) at **$0.54 / task** |
+| Verifier PASS precision, same 15 tasks, before → after the verifier fixes | **29% → 62%** (4 of 14 → 5 of 8) |
+| A closed money bug in a real ERP, re-solved from the issue text | draft PR [#221](https://github.com/moiz-lakkadkutta/Fabric-Inventory/pull/221): 24 min, $0.17, target CI 7/7 green |
+| Fabric campaign, 9 issues | **1 of 9 PASS** ($7.29): not yet an autonomous fixer on that codebase |
+
+**Runs on Nebius, with NVIDIA models:** Token Factory serves every model call · Sandboxes fork
+every issue and run the theater check on the unfixed base · a Serverless AI endpoint hosts the
+console · **Nemotron 3 Ultra** plans and judges, **Nemotron 3 Super** implements, **Nemotron 3.5
+Lightning** parses. [Details ↓](#runs-on-nebius)
 
 ## What it has done (real runs, not demos)
 
@@ -302,8 +318,10 @@ if you want CI on them.
 
 ## Limitations
 
-- The Hunter (finding bugs before fixing them) is designed but not yet shipped; issues come from
-  GitHub or the benchmark.
+- The Hunter (finding bugs before fixing them) covers one axis, IDOR / cross-tenant access, on
+  Fabric's API. It finds nothing on current Fabric (the known holes are fixed) and the issues it filed
+  (#225, #227) come from a replay at the pre-fix commit; it does not cover the frontend. Other issues come
+  from GitHub or the benchmark.
 - **A PASS is evidence, not proof.** SWE-rebench issues are often under-specified: a hidden test
   can require an interface or behaviour the issue never names. In the live check of the latest
   fixes, two of three PASSes had every row green: a repro that fails on base, the related base
