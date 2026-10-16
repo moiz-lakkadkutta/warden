@@ -106,6 +106,15 @@ Every entry: date · tool · what happened · numbers · what would have helped.
   fork. → the same ask as the 500 above: say whether re-polling the same operation id is safe
   after a read timeout, and give the SDK a built-in poll retry. A dropped poll costs the client a
   whole command re-run.
+- 2026-10-16 · runtime · The silent **65,535-byte** stdout cap (above) hit again, this time in
+  reading *files*: `cat tests/test_frame_unmarshaling.py` on gmr__pamqp-52 returned 65,535 of
+  65,709 bytes. Warden copied that cut file onto a candidate for its regression check, got a
+  SyntaxError, counted 237 "regressions", and ranked the only candidate the hidden tests accept
+  last (E1's one wrong best-of-N pick). The same cut hit `replace_in_file` on any file over
+  64 KiB (it wrote the cut read back). Workaround: read files as base64 chunks of 40 kB
+  (sha256 matches) and restore files with `git checkout` inside the sandbox. → a `read_file` /
+  `download` call in the SDK, or the `truncated` flag asked for above, would have made both
+  bugs visible on day one.
 
 ## Token Factory inference
 

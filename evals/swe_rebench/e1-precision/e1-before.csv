@@ -1,0 +1,16 @@
+task_id,resolved,verdict,false_pass,false_fail,unverified,theater_catch,tool_turns,usd,seconds,error,candidates,chosen,resolved_candidates
+andialbrecht__sqlparse-231,1,PASS,0,0,0,0,36,0.1207,184,,3,1,1
+gmr__pamqp-52,0,FAIL,0,0,0,0,60,0.8832,861,,3,3,2
+pre-commit__pre-commit-1997,0,PASS_WITH_CONCERNS,1,0,0,0,14,0.1594,1845,,3,2,
+SpikeInterface__spikeinterface-2775,0,PASS,1,0,0,0,29,0.3698,873,,3,2,
+asottile__setup-cfg-fmt-41,1,PASS,0,0,0,0,48,0.5751,542,,3,3,1;2;3
+crate__crate-python-584,0,PASS,1,0,0,0,51,0.4101,554,,3,2,
+python-cmd2__cmd2-672,0,PASS,1,0,0,0,31,0.1011,198,,3,1,
+MatterMiners__tardis-77,0,PASS_WITH_CONCERNS,1,0,0,0,57,0.5374,885,,3,1,
+dask__dask-ml-659,0,PASS,1,0,0,0,41,0.1511,619,,3,1,
+PennyLaneAI__pennylane-5831,1,PASS,0,0,0,0,21,0.2750,345,,3,2,2
+bridgecrewio__checkov-831,0,PASS,1,0,0,0,25,0.0830,172,,3,1,
+jpadilla__pyjwt-847,1,PASS,0,0,0,0,21,0.3430,358,,3,2,2
+olofk__fusesoc-724,0,PASS_WITH_CONCERNS,1,0,0,0,30,0.3746,623,,3,2,
+python-wheel-build__fromager-352,0,PASS,1,0,0,0,30,0.0863,203,,3,1,
+aio-libs__yarl-959,0,PASS,1,0,0,0,21,0.0836,200,,3,1,

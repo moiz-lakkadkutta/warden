@@ -1,0 +1,7 @@
+5 of 5 tasks to run · budget $5.00 · cap $1.50/task · 3 candidate(s)/task · results → evals/swe_rebench/e1-precision/results.shard-2.csv
+✗ crate__crate-python-584  PASS  $0.09  206s  FALSE PASS  #1 of 3 (hidden tests accept: none)
+✓ pre-commit__pre-commit-1997  PASS_WITH_CONCERNS  $0.54  1839s  #3 of 3 (hidden tests accept: 3)
+✓ PennyLaneAI__pennylane-5831  PASS  $0.11  189s  #1 of 3 (hidden tests accept: 1)
+✗ olofk__fusesoc-724  FAIL  $0.46  1140s  #3 of 3 (hidden tests accept: none)
+✗ gmr__pamqp-52  FAIL  $0.78  869s  #3 of 3 (hidden tests accept: none)
+ran 5 · resolved 2 · spent $1.98

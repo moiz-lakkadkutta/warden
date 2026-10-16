@@ -107,6 +107,7 @@ hidden tests pass, and Warden never sees those tests. Regenerate the table with
 |---|---|
 | Resolved | **11 / 49** (22%, 95% CI 13–36%) |
 | Verifier PASS precision (PASS the hidden tests accept) | 4 of 14 PASS (29%) |
+| Clean PASS precision (PASS without concerns) | 4 of 11 PASS (36%) |
 | Verifier PASS that hidden tests reject (false PASS) | 10 of 14 PASS |
 | Verifier FAIL on a fix hidden tests accept (false FAIL) | 6 of 35 FAIL |
 | Unverified (FAIL only because the suite timed out) | 1 |
@@ -122,7 +123,8 @@ What E1 shows:
 
 - **Best-of-N earns its cost.** Candidate 1 alone passes the hidden tests on 7 tasks; picking
   among three resolves 11. On one task (pamqp) a candidate that passes the hidden tests was
-  ranked below a FAIL, so a better ranker would reach 12.
+  ranked below an empty-diff FAIL, because a cut test file read as 237 regressions (fixed
+  below), so a better ranker would reach 12.
 - **False PASSes are mostly the benchmark, not the verifier.** Of the 10, 8 need an API, message
   or naming choice that the issue never states (yarl's hidden test even rejects what the issue
   asks for). 2 are verifier misses: the repro used a different exception class (pre-commit) or
@@ -132,6 +134,37 @@ What E1 shows:
   evidence.
 - **No harness errors** after the transport retry; the first pass lost 7 of 49 tasks to
   Sandboxes poll timeouts, which were re-run (`docs/status.md` §1j).
+
+**E1 + verifier fixes** (2026-10-16): the 14 tasks E1 marked PASS plus pamqp, re-run with the same
+settings after four fixes: the spec review checks the issue's own artefact; a main behaviour
+tested only by a guard is PASS WITH CONCERNS and takes the theater retry; the regression check
+restores test files from git (a 64 KiB stdout cut caused pamqp's wrong pick), and an empty diff
+ranks last. Rows: [`evals/swe_rebench/e1-precision/`](evals/swe_rebench/e1-precision/);
+`e1-before.csv` holds E1's rows for the same 15 tasks. Both tables come from `warden report`:
+
+| metric | E1 (same 15) | E1 + verifier fixes |
+|---|---|---|
+| Resolved | **4 / 15** (27%, 95% CI 11–52%) | **5 / 15** (33%, 95% CI 15–58%) |
+| Verifier PASS precision (PASS the hidden tests accept) | 4 of 14 PASS (29%) | **5 of 8 PASS (62%)** |
+| Clean PASS precision (PASS without concerns) | 4 of 11 PASS (36%) | 4 of 7 PASS (57%) |
+| Verifier PASS that hidden tests reject (false PASS) | 10 of 14 PASS | 3 of 8 PASS |
+| Verifier FAIL on a fix hidden tests accept (false FAIL) | 0 of 1 FAIL | 0 of 7 FAIL |
+| Cost | $0.30 / task, $4.55 total | $0.37 / task, $5.54 total |
+
+- Both verifier misses are now right: pre-commit's first two candidates FAILed on the
+  artefact rule, and the third, told why, caught `pre_commit.util.CalledProcessError` and
+  resolves. Checkov's candidate tested `kind: Deployment` and resolves.
+- 3 of the 4 correct PASSes held (sqlparse, pennylane, pyjwt). setup-cfg-fmt was lost to the
+  implementer, not the verifier: all 3 candidates used the 60 turns (99 unchanged re-reads) and
+  none passes the hidden tests, so FAIL is the right verdict.
+- 5 former false PASSes are now FAIL, each with no candidate the hidden tests accept. The 3 left
+  (crate, yarl, fromager) are the under-specified kind.
+- A re-run samples new candidates, so this mixes verifier and implementer changes. A cleaner
+  verifier-only check reran the new spec review on E1's own chosen candidates: it flags both
+  misses, keeps all 4 correct PASSes, and leaves the other 8 under-specified false PASSes alone
+  (`docs/status.md` §1k).
+- pamqp: all three candidates produced an empty diff this time, so the new ranking rule had
+  nothing to choose between; a unit test replays E1's recorded case.
 
 Earlier 10-task pilots (4/10 and 1/10 resolved at $0.13–$0.18 per task, one candidate) are in
 [`evals/swe_rebench/results.csv`](evals/swe_rebench/results.csv) and

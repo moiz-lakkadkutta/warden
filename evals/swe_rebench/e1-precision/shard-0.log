@@ -1,0 +1,7 @@
+5 of 5 tasks to run · budget $5.00 · cap $1.50/task · 3 candidate(s)/task · results → evals/swe_rebench/e1-precision/results.shard-0.csv
+✗ SpikeInterface__spikeinterface-2775  FAIL  $0.54  1266s  #3 of 3 (hidden tests accept: none)
+✗ python-cmd2__cmd2-672  FAIL  $0.55  899s  #2 of 3 (hidden tests accept: none)
+✗ MatterMiners__tardis-77  FAIL  $0.57  1618s  #3 of 3 (hidden tests accept: none)
+✓ bridgecrewio__checkov-831  PASS  $0.07  249s  #1 of 3 (hidden tests accept: 1)
+✗ python-wheel-build__fromager-352  PASS  $0.05  217s  FALSE PASS  #1 of 3 (hidden tests accept: none)
+ran 5 · resolved 1 · spent $1.77
