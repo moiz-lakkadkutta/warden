@@ -1103,9 +1103,22 @@ def report(
     """Metrics from eval results: resolved (95% CI), verifier precision, false PASS/FAIL, $/task."""
     from warden.eval import report as rep
 
+    def expand(paths: list[Path]) -> list[Path]:  # an eval directory means its results*.csv
+        return [f for p in paths for f in (sorted(p.glob("results*.csv")) if p.is_dir() else [p])]
+
+    csvs = expand(csvs)
+    baseline = expand(baseline) if baseline else None
     missing = [p for p in csvs if not p.exists()]
-    if missing:
-        fail(f"no such file: {missing[0]}", fix="pass the eval's results*.csv", code=2)
+    if missing or not csvs:
+        where = missing[0] if missing else "the given directory"
+        fail(f"no such file: {where}", fix="pass the eval's results*.csv", code=2)
+    if baseline and len({p.parent for p in csvs}) > 1:
+        fail(
+            "results from more than one directory with --baseline: a `--baseline dir/*.csv` "
+            "glob leaves its 2nd..nth file among the measured CSVs",
+            fix="pass directories: warden report evals/…/e2 --baseline evals/…/e1",
+            code=2,
+        )
     if excluded is None and (csvs[0].parent / "excluded.txt").exists():
         excluded = csvs[0].parent / "excluded.txt"
     skip = rep.read_excluded(excluded) if excluded is not None else {}

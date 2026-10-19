@@ -155,3 +155,28 @@ def test_cli_report_picks_up_a_sibling_excluded_txt(tmp_path: Path, shards: list
     (tmp_path / "excluded.txt").write_text("f__f-6\timage missing\n")
     res = CliRunner().invoke(app, ["report", *map(str, shards)])
     assert res.exit_code == 0 and '"n": 5' in res.stdout
+
+
+def test_cli_report_takes_eval_directories(tmp_path: Path, shards: list[Path]) -> None:
+    e1 = tmp_path / "e1"
+    e1.mkdir()
+    _write(e1 / "results.shard-0.csv", NEW + "a__a-1,0,FAIL,0,0,0,0,10,0.1000,100,\n")
+    _write(e1 / "notes.csv", "not,a,results,file\n")  # only results*.csv is read
+    res = CliRunner().invoke(
+        app, ["report", str(tmp_path), "--md", "--label", "E2", "--baseline", str(e1)]
+    )
+    assert res.exit_code == 0, res.output
+    assert "| Resolved | **0 / 1**" in res.stdout and "**3 / 6**" in res.stdout
+
+
+def test_cli_report_refuses_a_baseline_glob_that_leaked(tmp_path: Path, shards: list[Path]) -> None:
+    # `--baseline e1/*.csv` puts e1's 2nd..nth shard among the measured CSVs.
+    e1 = tmp_path / "e1"
+    e1.mkdir()
+    first = _write(e1 / "results.shard-0.csv", NEW + "a__a-1,0,FAIL,0,0,0,0,10,0.1,100,\n")
+    leaked = _write(e1 / "results.shard-1.csv", NEW + "b__b-2,0,FAIL,0,0,0,0,10,0.1,100,\n")
+    res = CliRunner().invoke(
+        app, ["report", *map(str, shards), str(leaked), "--md", "--baseline", str(first)]
+    )
+    assert res.exit_code == 2
+    assert "more than one directory" in res.output
