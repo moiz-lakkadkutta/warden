@@ -1,0 +1,11 @@
+task_id,resolved,verdict,false_pass,false_fail,unverified,theater_catch,tool_turns,usd,seconds,error,candidates,chosen,resolved_candidates,verify_retry
+IAMconsortium__nomenclature-431,0,PASS_WITH_CONCERNS,1,0,0,0,18,0.5770,1491,,3,3,,2:FAIL
+OSOceanAcoustics__echopype-428,0,FAIL,0,0,0,0,37,0.7422,1017,,3,1,,1:FAIL;3:FAIL
+SciCatProject__scitacean-148,0,FAIL,0,0,0,1,60,0.8480,1342,,3,1,,
+andialbrecht__sqlparse-231,1,PASS,0,0,0,0,28,0.3878,460,,3,2,1;2,
+coverahealth__dataspec-30,0,FAIL,0,0,0,1,60,1.1101,1540,,3,2,,
+gmr__pamqp-52,1,FAIL,0,1,0,0,41,0.4854,793,,3,3,1;2;3,2:FAIL;3:FAIL
+lightstep__lightstep-tracer-python-106,1,PASS_WITH_CONCERNS,0,0,0,0,47,0.5281,928,,3,3,1;3,1:FAIL;2:PASS_WITH_CONCERNS
+pre-commit__pre-commit-1997,1,PASS_WITH_CONCERNS,0,0,0,0,29,0.2869,2568,,3,2,2;3,1:PASS_WITH_CONCERNS
+pypa__virtualenv-2821,0,ERROR,0,0,0,0,0,0.2264,530,"ApiStatusCodeError: ApiStatusCodeError(request=RequestInfo(url='https://api.tokenfactory.nebius.com/sandboxes/v1/instances', method='POST'), response=ResponseInfo(headers={'date': 'Mon, 19 Oct 2026 16:42:39 GMT', 'conten",1,0,,
+pytorch__ignite-1265,1,PASS,0,0,0,0,37,0.1631,561,,3,1,1,

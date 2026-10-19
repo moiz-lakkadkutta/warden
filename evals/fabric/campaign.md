@@ -18,9 +18,10 @@ waves by the files their plans touch, each wave's passing fixes are merged with
 | `camp-replay-212-b` @ `43f3851^` | 5 | 0 | 0 | 0 | 5 | 4 | 0 | 0 | $2.21 |
 | `camp-replay-212-c` @ `43f3851^` | 6 | 0 | 0 | 0 | 6 | 6 | 0 | 0 | $1.14 |
 | `camp-replay-212-d` @ `43f3851^` | 6 | 2 | 0 | 0 | 6 | 6 | 0 | 0 | $1.35 |
+| `camp-replay-212-e` @ `43f3851^` | 2 | 1 | 0 | 0 | 2 | 2 | 0 | 0 | $0.41 |
 | `camp-replay-215` @ `60ae34b^` | 1 | 1 | 0 | 0 | 1 | 1 | 0 | 0 | $0.41 |
 | `camp-replay-216` @ `3eee35f^` | 1 | 0 | 0 | 0 | 1 | 1 | 0 | 0 | $0.42 |
-| **final** (best attempt per issue) | 9 | 3 | 1 | 0 | 8 | 8 | 1 | 1 | $7.29 |
+| **final** (best attempt per issue) | 9 | 3 | 1 | 0 | 8 | 8 | 1 | 1 | $7.70 |
 
 found = issues attempted · confirmed = a new test failed on the unfixed code (theater check) · FAIL includes ERROR · merged = merged cleanly into the wave's integration image · final USD = every attempt's spend
 
@@ -53,6 +54,8 @@ found = issues attempted · confirmed = a new test failed on the unfixed code (t
 | #205 [P1] Delete guards missing for BOM/Design/Operation-Master (only Routi | backlog | `43f3851^` | FAIL | n | y: schema, money | 1 | — | — | 0.24 | 5 | `camp-replay-212-d-205` | implementer did not finish (budget or blocked); theater: invalid repro — test_manufacturing_cascade_delete.py: invalid: collection error on base; still red with |
 | #206 [P1] Delivery challan can over-dispatch its SO (250%) and can be issue | backlog | `43f3851^` | FAIL | y | y: money, schema | 2 | — | — | 0.24 | 16 | `camp-replay-212-d-206` | implementer did not finish (budget or blocked); full suite not green ({'failed': 2, 'passed': 1506}) |
 | #207 [P1] Numeric overflow → 500 UNKNOWN (invoice line product, receipt amo | backlog | `43f3851^` | FAIL | n | y: money, schema | 3 | — | — | 0.22 | 5 | `camp-replay-212-d-207` | implementer did not finish (budget or blocked); theater: invalid repro — test_error_handler.py::test_numeric_overflow_maps_to_422: invalid: fixture/setup error  |
+| #196 [P1] Dashboard sales/GST KPIs count DRAFT invoices (revenue & GST-coll | backlog | `43f3851^` | FAIL | y | y: money | 1 | — | — | 0.14 | 26 | `camp-replay-212-e-196` | full suite not green ({'failed': 2, 'passed': 1506}); mypy red |
+| #206 [P1] Delivery challan can over-dispatch its SO (250%) and can be issue | backlog | `43f3851^` | FAIL | n | y: money | 1 | — | — | 0.27 | 18 | `camp-replay-212-e-206` | implementer did not finish (budget or blocked); theater: invalid repro — test_dc_service.py::test_issue_dc_rejects_over_dispatch: invalid: fails on base (Failed |
 | #215 [P3] Registered buyer whose GSTIN prefix isn't a state code (99/00) si | backlog | `60ae34b^` | FAIL | y | y: schema, security, money | 1 | — | — | 0.41 | 34 | `camp-replay-215-215` | implementer did not finish (budget or blocked); mypy red |
 | #216 [P2] Credit notes need their own series + a credit-note document (Rule | backlog | `3eee35f^` | FAIL | n | y: money, schema, tax | 1 | — | — | 0.42 | 23 | `camp-replay-216-216` | implementer did not finish (budget or blocked); theater: invalid repro — test_credit_note.py: invalid: collection error on base; still red with the fix |
 
@@ -74,6 +77,7 @@ found = issues attempted · confirmed = a new test failed on the unfixed code (t
 | `camp-replay-212-d` | `43f3851^` | 1 | #196 #197 #200 #205 | — | #196: no candidate to merge (FAIL or error); #197: no candidate to merge (FAIL or error); #200: no candidate to merge (FAIL or error); #205: no candidate to merge (FAIL or error) | `4746b2d1` | not run (nothing merged) |
 | `camp-replay-212-d` | `43f3851^` | 2 | #206 | — | #206: no candidate to merge (FAIL or error) | `4746b2d1` | not run (nothing merged) |
 | `camp-replay-212-d` | `43f3851^` | 3 | #207 | — | #207: no candidate to merge (FAIL or error) | `4746b2d1` | not run (nothing merged) |
+| `camp-replay-212-e` | `43f3851^` | 1 | #196 #206 | — | #196: no candidate to merge (FAIL or error); #206: no candidate to merge (FAIL or error) | `775b2347` | not run (nothing merged) |
 <!-- campaign:end -->
 
 ## Notes (2026-10-15, written by hand; the tables above are generated)

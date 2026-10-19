@@ -277,5 +277,25 @@
     "gate": "not run (nothing merged)",
     "gate_ok": null,
     "integration_branch": ""
+  },
+  {
+    "campaign": "camp-replay-212-e",
+    "at": "43f3851^",
+    "base_sha": "fb19cde68d37146f6ef4228507fa122a520b6906",
+    "wave": 1,
+    "issues": [
+      196,
+      206
+    ],
+    "merged": [],
+    "not_merged": {
+      "196": "no candidate to merge (FAIL or error)",
+      "206": "no candidate to merge (FAIL or error)"
+    },
+    "image": "775b2347-ad98-4af2-bff4-972e758bccce",
+    "sha": "fb19cde68d37146f6ef4228507fa122a520b6906",
+    "gate": "not run (nothing merged)",
+    "gate_ok": null,
+    "integration_branch": ""
   }
 ]

@@ -1,0 +1,12 @@
+10 of 10 tasks to run · budget $8.00 · cap $1.50/task · 3 candidate(s)/task · results → evals/swe_rebench/e2/results.shard-1.csv
+✗ Materials-Consortia__optimade-python-tools-670  FAIL  $0.70  1459s  #1 of 3 (hidden tests accept: none)
+✗ Ouranosinc__xclim-413  FAIL  $1.32  2118s  #3 of 3 (hidden tests accept: none)
+✗ SpikeInterface__spikeinterface-2775  PASS  $0.15  378s  FALSE PASS  #1 of 3 (hidden tests accept: none)
+✓ asottile__setup-cfg-fmt-41  PASS  $0.08  168s  #1 of 3 (hidden tests accept: 1)
+✗ crate__crate-python-584  PASS  $0.27  375s  FALSE PASS  #1 of 3 (hidden tests accept: none)
+✗ iossifovlab__gpf-446  FAIL  $1.07  1728s  #1 of 3 (hidden tests accept: none)
+✗ locustio__locust-2663  FAIL  $0.83  1779s  #3 of 3 (hidden tests accept: none)
+✗ psf__black-3451  FAIL  $0.96  1746s  #2 of 3 (hidden tests accept: none)
+✗ python-cmd2__cmd2-672  PASS  $0.11  195s  FALSE PASS  #1 of 3 (hidden tests accept: none)
+✗ scikit-learn-contrib__imbalanced-learn-1013  PASS  $0.91  1161s  FALSE PASS  #3 of 3 (hidden tests accept: none)
+ran 10 · resolved 1 · spent $6.40
