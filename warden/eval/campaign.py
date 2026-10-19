@@ -539,12 +539,17 @@ _RANK = {"PASS": 0, "PASS_WITH_CONCERNS": 1, "FAIL": 2, "ERROR": 3, "SKIPPED": 4
 
 
 def best_rows(rows: Sequence[Row]) -> list[Row]:
-    """One row per (issue, at): the best verdict over every attempt (latest on a tie)."""
+    """One row per (issue, at): the best verdict over every attempt; on a tie a confirmed repro,
+    then the latest."""
+
+    def rank(r: Row) -> tuple[int, int]:
+        return (_RANK.get(r.verdict, 9), 0 if r.repro == "y" else 1)
+
     best: dict[tuple[int, str], Row] = {}
     for r in rows:
         key = (r.issue, r.at)
         cur = best.get(key)
-        if cur is None or _RANK.get(r.verdict, 9) <= _RANK.get(cur.verdict, 9):
+        if cur is None or rank(r) <= rank(cur):
             best[key] = r
     return sorted(best.values(), key=lambda r: (r.at, r.issue))
 

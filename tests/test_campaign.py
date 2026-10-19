@@ -206,6 +206,15 @@ def test_best_rows_keeps_the_best_attempt_and_csv_keeps_both(tmp_path: Path) -> 
     assert "| **final** (best attempt per issue) | 1 | 0 | 1 | 0 | 0 | 0 | 0 | 0 | $0.50 |" in md
 
 
+def test_best_rows_prefers_a_confirmed_repro_on_a_verdict_tie() -> None:
+    def row(campaign: str, repro: str) -> cp.Row:
+        return cp.Row(206, "backlog", "FAIL", "y", 1, "—", "", 0.2, 60, at="x^", campaign=campaign,
+                      repro=repro)  # fmt: skip
+
+    assert [r.campaign for r in cp.best_rows([row("d", "y"), row("e", "n")])] == ["d"]
+    assert [r.campaign for r in cp.best_rows([row("d", "y"), row("e", "y")])] == ["e"]
+
+
 def test_pending_reason() -> None:
     p = Plan(
         issue=1,
