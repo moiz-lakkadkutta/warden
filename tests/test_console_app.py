@@ -81,7 +81,22 @@ def test_events_filter_by_phase_and_kind(client: TestClient) -> None:
     assert len(client.get(f"/api/runs/{RID}/cost").json()) == 2
 
 
-@pytest.mark.parametrize("bad", ["nope", "20261010-111217-zzzz", "20991231-000000-0000", ".."])
+def test_named_run_ids_are_listed(tmp_path: Path) -> None:
+    # `warden campaign` names its runs `<campaign>-<issue>`, not by timestamp.
+    root = _site(tmp_path)
+    (root / "camp-replay-212-196").mkdir()
+    (root / "camp-replay-212-196" / "events.jsonl").write_text(
+        json.dumps({"ts": "2026-10-15T10:00:00Z", "phase": "fix", "kind": "llm", "data": {}})
+    )
+    client = TestClient(create_app(root))
+    assert client.get("/healthz").json()["runs"] == 3
+    assert "camp-replay-212-196" in [r["id"] for r in client.get("/api/runs").json()]
+    assert len(client.get("/api/runs/camp-replay-212-196/events").json()) == 1
+
+
+@pytest.mark.parametrize(
+    "bad", ["nope", "20261010-111217-zzzz", "20991231-000000-0000", "..", ".hidden", "a.b"]
+)
 def test_unknown_or_malformed_run_is_404(client: TestClient, bad: str) -> None:
     assert client.get(f"/api/runs/{bad}/events").status_code == 404
 

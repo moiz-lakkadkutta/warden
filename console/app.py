@@ -32,7 +32,9 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-RUN_ID = re.compile(r"^[0-9]{8}-[0-9]{6}-[0-9a-f]{4}$")
+# Timestamp ids (20261010-123442-279b) and named ones (camp-replay-212-196). No "." or "/", so an
+# id is always one plain path segment.
+RUN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$")
 DEFAULT_ROOT = Path(__file__).resolve().parent.parent / "site"
 BUILD_FILE = Path(__file__).resolve().parent / "BUILD"  # written by the Dockerfile (commit sha)
 
