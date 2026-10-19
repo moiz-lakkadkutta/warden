@@ -693,11 +693,38 @@ for i in 0 1 2 3 4; do WARDEN_MAX_TOOL_TURNS=60 nohup caffeinate -i uv run pytho
   --max-usd 1.5 --budget 8 --yes > evals/swe_rebench/e2/shard-$i.log 2>&1 & done
 WARDEN_MAX_TOOL_TURNS=50 WARDEN_CANDIDATES=1 uv run warden campaign --issues 196,206 \
   --at '43f3851^' --name camp-replay-212-e --max-usd 0.8 --budget 2.0 --yes
-uv run warden report evals/swe_rebench/e2/results.shard-*.csv --md --label E2 \
-  --baseline evals/swe_rebench/e1/results.shard-*.csv --baseline-label E1
+uv run warden report evals/swe_rebench/e2 --md --label E2 \
+  --baseline evals/swe_rebench/e1 --baseline-label E1
 ```
+(The glob form `--baseline e1/results.shard-*.csv` was wrong: only the first E1 shard became the
+baseline and the other four were merged into E2's rows. `warden report` now takes directories and
+refuses that mix.)
 (`drive.py` exists because the agent harness refuses shell commands containing the eval
 subcommand's name; it calls `warden.cli.app(["eval", ...])`.)
+
+### 1o. E2 + camp-replay-212-e live (2026-10-19): 18/49 resolved, PASS precision 48%, $24.57
+
+Run on AC power with the lid open (the §1n stall did not recur). Paid with Moiz's OK; the quote
+was ~$10 because `--budget 8` was misread as a total: it is **per shard**, so 5 shards spent
+**$24.16** + $0.41 for the replay. Quote `budget × shards` next time.
+
+**E2** (`evals/swe_rebench/e2/`, the E1 sample and settings): **18 / 49 resolved** (37%, CI
+25–51%; E1 11/49), PASS precision **13 of 27 (48%)** (E1 4 of 14), clean PASS 7 of 19, false
+FAIL 5 of 21, theater catches 10, $0.49/task. 8 tasks gained, 1 lost (pyjwt). Verify retry: 13
+candidates sent back, 3 then PASS (lightstep ✓, pre-commit ✓, pynetdicom false PASS). 1 ERROR:
+virtualenv-2821, `ApiStatusCodeError` on Sandboxes `POST /instances`; **the HTTP status is lost**
+because the result row and log keep only the head of the exception repr (follow-up: record
+`status_code` and body first).
+
+**camp-replay-212-e** (#196, #206 @ `43f3851^`, verify retry on): both FAIL, $0.41, no PR. #196:
+valid repro, verify retry 8 turns, still 2 suite failures + mypy. #206: invalid repro (fails on
+base for the wrong reason and still fails with the fix), so no verify retry by design.
+
+Fixes in the same session: `warden report` dir args + refusal of a leaked baseline glob
+(`629cdc3`); campaign best attempt prefers a confirmed repro on a tie (`f673f08`, final row
+confirmed back to 3); console API lists named run ids (`8dce09f`); console redeployed with the
+phone fix + the #226 run (`/healthz` → 6 runs, build `8dce09f`). README, Devpost draft and video
+script numbers moved to E2.
 
 ### 1a. Earlier notes: blocked by Token Factory billing (resolved)
 

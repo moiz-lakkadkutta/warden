@@ -111,14 +111,15 @@ opens a draft PR or comments why it didn't.
   money bug was re-solved unattended, with comments hidden, on the code before the human fix: 24
   min, $0.17, and the target repo's own CI went 7/7 green. Its repro test fails on the unfixed base
   (`10498.95 == 0`) and passes on the candidate.
-- **A measured number, with its error bars:** 11 / 49 SWE-rebench tasks resolved (22%, 95% CI
-  13–36%) at $0.54 per task, $26.41 in total†, with the verifier's false-PASS rate printed next to
-  it rather than hidden.
-- **Verifier precision 29% → 62%** on the same 15 tasks (4 of 14 → 5 of 8 PASS accepted by the
-  hidden tests) after the spec review learned to check the issue's own artefact and a guard-only
-  test stopped counting as a repro ($5.54 for the re-run).
-- **The theater check works:** across E1 it rejected 14 new tests† that already passed without the
-  fix, and on Fabric it rejected eight tests that failed for the wrong reason.
+- **A measured number, with its error bars:** 18 / 49 SWE-rebench tasks resolved (37%, 95% CI
+  25–51%) at $0.49 per task, $24.16 in total†, up from 11 / 49 (22%) on the same tasks a week
+  earlier, with the verifier's false-PASS rate printed next to it rather than hidden.
+- **Verifier PASS precision 29% → 48%** on those 49 tasks (4 of 14 → 13 of 27 PASS accepted by
+  the hidden tests)† after the spec review learned to check the issue's own artefact, a guard-only
+  test stopped counting as a repro, and a valid repro with a red check goes back once (62% on the
+  15 tasks first marked PASS).
+- **The theater check works:** it rejected 14 and then 10 new tests† that already passed without
+  the fix, and on Fabric it rejected eight tests that failed for the wrong reason.
 - **Nothing unsafe shipped:** no FAIL produced a branch or a PR, and every money or tax issue was
   labelled `PENDING-HUMAN`.
 
@@ -134,7 +135,7 @@ opens a draft PR or comments why it didn't.
   strength. Lightning is cheap, but it reasons by default, which makes it slower than expected
   for a router.
 - **A benchmark win is not a codebase win.** On a real ERP the campaign passed **1 of 9** issues
-  ($7.29, 27 attempts). That is the number that tells us what to build next.
+  ($7.70, 29 attempts). That is the number that tells us what to build next.
 
 ## What's next for Warden
 

@@ -22,10 +22,10 @@ draft PR #221, with its branch tree:
 
 | Measure | Result |
 |---|---|
-| SWE-rebench, 49 graded tasks, hidden tests Warden never sees | **11 / 49 resolved** (22%) at **$0.54 / task** |
-| Verifier PASS precision, same 15 tasks, before → after the verifier fixes | **29% → 62%** (4 of 14 → 5 of 8) |
+| SWE-rebench, 49 graded tasks, hidden tests Warden never sees | **18 / 49 resolved** (37%) at **$0.49 / task** (E2; E1 was 11 / 49) |
+| Verifier PASS precision on those 49, E1 → E2 | **29% → 48%** (4 of 14 → 13 of 27) |
 | A closed money bug in a real ERP, re-solved from the issue text | draft PR [#221](https://github.com/moiz-lakkadkutta/Fabric-Inventory/pull/221): 24 min, $0.17, target CI 7/7 green |
-| Fabric campaign, 9 issues | **1 of 9 PASS** ($7.29): not yet an autonomous fixer on that codebase |
+| Fabric campaign, 9 issues | **1 of 9 PASS** ($7.70): not yet an autonomous fixer on that codebase |
 
 **Runs on Nebius, with NVIDIA models:** Token Factory serves every model call · Sandboxes fork
 every issue and run the theater check on the unfixed base · a Serverless AI endpoint hosts the
@@ -219,6 +219,40 @@ ranks last. Rows: [`evals/swe_rebench/e1-precision/`](evals/swe_rebench/e1-preci
 - pamqp: all three candidates produced an empty diff this time, so the new ranking rule had
   nothing to choose between; a unit test replays E1's recorded case.
 
+**E2** (2026-10-19): the same 49 tasks and settings as E1 (5 shards, 3 candidates, $1.50 cap, 60
+turns), after everything merged since: the verifier fixes above, the implementer's large-file
+tools and edit mode (`docs/status.md` §1l) and the verify retry (§1n). Rows:
+[`evals/swe_rebench/e2/`](evals/swe_rebench/e2/). Table:
+`warden report evals/swe_rebench/e2 --md --label E2 --baseline evals/swe_rebench/e1 --baseline-label E1`.
+
+| metric | E1 | E2 |
+|---|---|---|
+| Resolved | **11 / 49** (22%, 95% CI 13–36%) | **18 / 49** (37%, 95% CI 25–51%) |
+| Verifier PASS precision (PASS the hidden tests accept) | 4 of 14 PASS (29%) | 13 of 27 PASS (48%) |
+| Clean PASS precision (PASS without concerns) | 4 of 11 PASS (36%) | 7 of 19 PASS (37%) |
+| Verifier PASS that hidden tests reject (false PASS) | 10 of 14 PASS | 14 of 27 PASS |
+| Verifier FAIL on a fix hidden tests accept (false FAIL) | 6 of 35 FAIL | 5 of 21 FAIL |
+| Unverified (FAIL only because the suite timed out) | 1 | 0 |
+| Theater catches (new test already passes on the unfixed base) | 14 | 10 |
+| Errors (run did not reach a verdict) | 0 | 1 |
+| Cost | **$0.54 / task**, $26.41 total | **$0.49 / task**, $24.16 total |
+| Median wall-clock per task | 14 min 21 s | 14 min 11 s |
+| Mean tool turns (runs that reached a verdict) | 47.7 | 41.7 |
+| Excluded (base cannot be graded; see excluded.txt) | 1 | 1 |
+| Verify retries (valid repro, red gate / regression / spec: sent back once) | — | 13 candidates, 3 then PASS |
+
+- **Resolved 11 → 18:** 8 tasks gained, 1 lost (pyjwt). The confidence intervals overlap, and a
+  re-run samples new candidates, so this is a likely gain, not a proven one.
+- "Resolved" counts the chosen candidate passing the hidden tests, whatever the verdict. Warden
+  would have opened a correct draft PR on **13** tasks (a PASS the hidden tests accept); the
+  other 5 were false FAILs, where the right fix opened nothing.
+- **PASS precision 29% → 48%** across all 49. That is lower than the 62% on the 15-task re-run
+  above, which was the set of E1 PASSes. 14 false PASSes remain, most of them the
+  under-specified kind.
+- **Verify retry:** 13 candidates were sent back once and 3 then passed: 2 are correct
+  (lightstep, pre-commit) and 1 is a false PASS (pynetdicom).
+- 1 error: a Sandboxes `POST /instances` failed with an API status error on virtualenv-2821.
+
 Earlier 10-task pilots (4/10 and 1/10 resolved at $0.13–$0.18 per task, one candidate) are in
 [`evals/swe_rebench/results.csv`](evals/swe_rebench/results.csv) and
 [`evals/swe_rebench/pilot-3/`](evals/swe_rebench/pilot-3/results.csv), with notes in `docs/status.md` §1d–1e.
@@ -235,7 +269,7 @@ commit before the human fix from the issue text alone. Per-issue rows, notes and
 
 | found | confirmed | PASS | PASS_WITH_CONCERNS | FAIL | PENDING-HUMAN | PRs | USD |
 |---|---|---|---|---|---|---|---|
-| 9 | 3 | **1** | 0 | 8 | 8 of 9 | 1 ([#226](https://github.com/moiz-lakkadkutta/Fabric-Inventory/pull/226), Fabric CI 7/7 green) | **$7.29** (27 attempts) |
+| 9 | 3 | **1** | 0 | 8 | 8 of 9 | 1 ([#226](https://github.com/moiz-lakkadkutta/Fabric-Inventory/pull/226), Fabric CI 7/7 green) | **$7.70** (29 attempts) |
 
 Not yet useful as an autonomous fixer on this codebase: 1 of 9. In the first 15 attempts the
 implementer (Nemotron 3 Super) never called `finish` in 13. It looped on Fabric's 900-line test
@@ -252,7 +286,9 @@ Warden then changed the implementer's tools (`docs/status.md` §1l):
 The six #212 issues were re-run twice (`camp-replay-212-c`, `-d`). With edit mode, 5 of 6
 candidates edited source code (1 before), cached re-reads fell from 71 to 32, and 2 repros were
 valid (1 before). PASS stayed at 0 of 6 in both re-runs: the remaining failures are wrong repros,
-suite regressions and lint, not the loop. The safety side held:
+suite regressions and lint, not the loop. `camp-replay-212-e` (2026-10-19) retried #196 and
+#206 with the verify retry: #196's valid repro went back for 8 turns and stayed red on 2 suite
+tests and mypy; #206's repro was invalid, so it did not qualify. Both FAIL, $0.41, no PR. The safety side held:
 - No FAIL produced a branch or a PR.
 - The theater check rejected eight new tests that failed for the wrong reason.
 - The spec review caught a candidate that was green on suite, mypy and ruff but implemented 1 of

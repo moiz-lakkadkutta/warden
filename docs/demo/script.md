@@ -103,19 +103,19 @@ toolbar, iPhone 12 Pro):
 
 ## Shot 7 · 2:05–2:35 · Results, honestly
 
-**Capture:** README, scrolled to "Results": the E1 table, then the "E1 + verifier fixes" table,
-then "Fabric campaign":
+**Capture:** README, scrolled to "Results": the E1 table, then the "E2" table, then "Fabric
+campaign":
 `https://github.com/moiz-lakkadkutta/warden#results`
 
 **Narration:**
-> On fifty SWE-rebench tasks, graded by hidden tests Warden never sees, it resolved 11 of 49, at 54
-> cents a task. Its own PASS verdict was right only 29% of the time, so we fixed the verifier: on
-> the same 15 tasks, PASS precision went from 29 to 62%. The misses left are issues that never state
-> what the hidden test demands. And on Fabric's nine-issue campaign, one passed. That's in the
-> README too. A FAIL never opens a PR.
+> On fifty SWE-rebench tasks, graded by hidden tests Warden never sees, it first resolved 11 of
+> 49, and its own PASS verdict was right only 29% of the time. We fixed the verifier and the
+> implementer and re-ran the same tasks: 18 of 49, at 49 cents a task, with PASS precision at 48%.
+> The misses left are issues that never state what the hidden test demands. And on Fabric's
+> nine-issue campaign, one passed. That's in the README too. A FAIL never opens a PR.
 
-On screen: highlight `11 / 49`, `$0.54 / task`, `4 of 14 PASS (29%)` → `5 of 8 PASS (62%)`, and the
-campaign row `1 … 8 … $7.29`.
+On screen: highlight `11 / 49` → `18 / 49`, `$0.49 / task`, `4 of 14 PASS (29%)` → `13 of 27 PASS
+(48%)`, and the campaign row `1 … 8 … $7.70`.
 
 ## Shot 8 · 2:35–2:50 · Model routing, close
 
