@@ -335,7 +335,10 @@ if you want CI on them.
 - The Hunter (finding bugs before fixing them) covers one axis, IDOR / cross-tenant access, on
   Fabric's API. It finds nothing on current Fabric (the known holes are fixed) and the issues it filed
   (#225, #227) come from a replay at the pre-fix commit; it does not cover the frontend. Other issues come
-  from GitHub or the benchmark.
+  from GitHub or the benchmark. **Not built:** the race, money, malformed-input and flow hunt
+  axes (`warden/hunt/axes/{race,money,malformed,flow}.py` are signatures only), the
+  concurrency check in verify (`warden/verify/race.py`), and a migration
+  upgrade → downgrade → upgrade round-trip in the gate (the gate checks a single alembic head).
 - **A PASS is evidence, not proof.** SWE-rebench issues are often under-specified: a hidden test
   can require an interface or behaviour the issue never names. In the live check of the latest
   fixes, two of three PASSes had every row green: a repro that fails on base, the related base

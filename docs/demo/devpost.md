@@ -139,8 +139,9 @@ opens a draft PR or comments why it didn't.
 ## What's next for Warden
 
 - Make the implementer reliable on large real-world files (Fabric campaign: 1 of 9 today).
-- More Hunter axes: the race-condition probe (concurrent finalize → duplicate vouchers) is designed
-  and stubbed in the demo; frontend is not covered.
+- More Hunter axes: race (concurrent finalize → duplicate vouchers), money, malformed input and
+  flow are designed but not built (only the IDOR axis runs today); frontend is not covered.
+- A concurrency check in verify and a migration downgrade round-trip in the gate.
 - Spend the verifier's doubt where it matters: when the spec review sees an under-specified
   behaviour, say so in the PR instead of passing it.
 - Run on more repos than Fabric and the SWE-rebench sample, and publish each run's console page.
