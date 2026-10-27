@@ -88,7 +88,7 @@ Optional cut: the campaign's PR `https://github.com/moiz-lakkadkutta/Fabric-Inve
 **Narration:**
 > The PR body is the evidence: each claim, the check that backs it, and what was *not* verified.
 > This was a closed issue, re-solved unattended from the issue text alone, on the code before the
-> human fix: 24 minutes, 17 cents. Fabric's own CI ran seven jobs, all green. It touches money, so
+> human fix, for seventeen cents. Fabric's own CI ran seven jobs, all green. It touches money, so
 > it's labelled pending-human. Warden opens drafts; it never merges.
 
 ## Shot 6 · 1:55–2:05 · The live console on Nebius

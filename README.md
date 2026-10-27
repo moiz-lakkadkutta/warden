@@ -24,7 +24,7 @@ draft PR #221, with its branch tree:
 |---|---|
 | SWE-rebench, 49 graded tasks, hidden tests Warden never sees | **18 / 49 resolved** (37%) at **$0.49 / task** (E2; E1 was 11 / 49) |
 | Verifier PASS precision on those 49, E1 → E2 | **29% → 48%** (4 of 14 → 13 of 27) |
-| A closed money bug in a real ERP, re-solved from the issue text | draft PR [#221](https://github.com/moiz-lakkadkutta/Fabric-Inventory/pull/221): 24 min, $0.17, target CI 7/7 green |
+| A closed money bug in a real ERP, re-solved from the issue text | draft PR [#221](https://github.com/moiz-lakkadkutta/Fabric-Inventory/pull/221): $0.17 of model spend, target CI 7/7 green |
 | Fabric campaign, 9 issues | **1 of 9 PASS** ($7.70): not yet an autonomous fixer on that codebase |
 
 **Runs on Nebius, with NVIDIA models:** Token Factory serves every model call · Sandboxes fork
@@ -36,7 +36,7 @@ Lightning** parses. [Details ↓](#runs-on-nebius)
 
 - **[Fabric-Inventory#221](https://github.com/moiz-lakkadkutta/Fabric-Inventory/pull/221)**: a
   closed ERP issue (#196, a money bug in invoice totals) was re-solved unattended from the issue
-  text alone, with comments hidden, on the code as it was before the human fix. **24 min, $0.17.**
+  text alone, with comments hidden, on the code as it was before the human fix, for **$0.17** of model spend.
   Draft PR labelled `PENDING-HUMAN`. The target repo's own CI: **7/7 jobs green.**
 - The theater check on that run: the new repro test **fails on the unfixed base**
   (`10498.95 == 0`) and passes on the candidate ([screenshot](docs/spike-A7.png)).

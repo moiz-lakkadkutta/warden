@@ -32,6 +32,19 @@ green test the agent wrote proves nothing if that test would have passed without
 an agent whose second half exists to doubt the first, and that shows its evidence instead of
 narrating confidence.
 
+Who it's for: small teams and solo maintainers of code where a wrong fix costs money (ERP, billing, invoicing, multi-tenant SaaS), who use coding agents but cannot afford to review every agent PR line by line. Warden does the doubting first and hands them a draft PR with its evidence, or nothing.
+
+## What makes Warden different
+
+Many agents now fix code and run tests in a sandbox. Warden's verifier asks a harder question, and it is tested on real code:
+
+- **It proves the test is real.** New tests must **fail on a fork of the unfixed base** (the theater check). A test that passes without the fix doesn't count; it rejected 14, then 10, such tests across our two SWE-rebench runs, and eight wrong-reason failures on Fabric.
+- **It finds bugs too.** The Hunter boots the app in a sandbox fork and confirms cross-tenant holes twice before filing an issue, for $0 of model spend.
+- **It works on a production codebase, not only a benchmark.** A real draft PR on a live ERP ([#221](https://github.com/moiz-lakkadkutta/Fabric-Inventory/pull/221)), with that repo's own CI 7/7 green.
+- **It publishes its own error rate.** The verifier's PASS precision (48%) and its 1-of-9 result on the ERP campaign are in the README, next to the 18/49.
+- **You can install it today.** It's a GitHub Action: label an issue `warden`, get a draft PR or a comment explaining why not. No token ever enters a sandbox, and Warden never merges.
+- **Every run can be inspected.** A live console on a Nebius Serverless endpoint shows each run's fork tree, cost and evidence.
+
 ## What it does
 
 Warden runs **Hunt → Plan → Fix → Verify → PR** on one issue:
@@ -86,6 +99,10 @@ opens a draft PR or comments why it didn't.
 - Python 3.12, `uv`, typer-slim, pydantic, a plain state machine (no agent framework), `mypy
   --strict`, offline tests against a fake sandbox, and CI that replays a recorded run.
 
+### How Warden uses Tavily
+
+The planner never cites from memory. Nemotron 3.5 Lightning turns the issue into search queries; Warden calls **Tavily search at runtime** (`search_depth="advanced"`, `include_domains` limited to official documentation sites, 3 results per query); Nemotron 3 Ultra then writes the plan, and any citation whose URL did not come back from Tavily is dropped and logged, so **every cited URL in a plan resolves**. On the run behind PR #221, two `tavily.search` calls about SQLAlchemy `in_()` filtering on an enum column are in its `events.jsonl` and on the live console. A Tavily error is logged and planning continues without web sources. Code: [`warden/plan/research.py`](https://github.com/moiz-lakkadkutta/warden/blob/main/warden/plan/research.py), [`warden/plan/planner.py`](https://github.com/moiz-lakkadkutta/warden/blob/main/warden/plan/planner.py).
+
 ## Challenges we ran into
 
 - **A PASS on under-specified issues.** On SWE-rebench our verifier's first PASS precision was 4 of
@@ -113,8 +130,8 @@ opens a draft PR or comments why it didn't.
 
 - **A real draft PR from issue text alone:**
   [Fabric-Inventory#221](https://github.com/moiz-lakkadkutta/Fabric-Inventory/pull/221). A closed
-  money bug was re-solved unattended, with comments hidden, on the code before the human fix: 24
-  min, $0.17, and the target repo's own CI went 7/7 green. Its repro test fails on the unfixed base
+  money bug was re-solved unattended, with comments hidden, on the code before the human fix, for
+  $0.17 of model spend, and the target repo's own CI went 7/7 green. Its repro test fails on the unfixed base
   (`10498.95 == 0`) and passes on the candidate.
 - **A measured number, with its error bars:** 18 / 49 SWE-rebench tasks resolved (37%, 95% CI
   25–51%) at $0.49 per task, $24.16 in total†, up from 11 / 49 (22%) on the same tasks a week
