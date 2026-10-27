@@ -10,12 +10,12 @@
 # Needs: docker (buildx) — or, with no Docker daemon, crane + uv — the nebius CLI logged in (`nebius iam whoami`), jq, curl.
 # Overrides (shell variables for this script only; Warden itself never reads them):
 #   PARENT_ID   project id      (default: the nebius profile's parent-id)
-#   NAME        endpoint name   (default: warden-console)
+#   NAME        endpoint name   (default: warden-console-2)
 #   REGISTRY    registry name   (default: warden)
 #   PLATFORM / PRESET / DISK    (default: cpu-d3 / 2vcpu-8gb / 32Gi; the cheapest CPU shape)
 set -euo pipefail
 
-NAME="${NAME:-warden-console}"
+NAME="${NAME:-warden-console-2}"  # warden-console (aiendpoint-e04v1xybmyd76zq065) died 2026-10-27: VMStopped, restart refused as "outdated"
 REGISTRY="${REGISTRY:-warden}"
 PLATFORM="${PLATFORM:-cpu-d3}"
 PRESET="${PRESET:-2vcpu-8gb}"

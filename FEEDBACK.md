@@ -267,3 +267,15 @@ Every entry: date · tool · what happened · numbers · what would have helped.
 - 2026-10-15 · Container Registry · pushing works daemonless (`crane` + the `nebius` docker
   credential helper from `nebius registry configure-helper`), which mattered: the Mac's Docker
   Desktop was owned by another macOS user. → say in the quickstart that any OCI client works.
+
+## 2026-10-27 · Serverless AI endpoint died silently, could not be restarted
+
+- The `warden-console` CPU endpoint (cpu-d3 2vcpu-8gb, created 2026-10-15) was found in state
+  ERROR `VMStopped`: "The underlying virtual machine was stopped or deleted unexpectedly." No
+  notification; we only noticed because the public URL returned 404 `unknown_tunnel`.
+- `nebius ai endpoint restart` then failed with `FailedPrecondition: This Endpoint/Devlab is
+  outdated. Please create a new one.` (trace `1a9211ed29717defe785093f2133f6ce`). Nothing in the
+  CLI or docs says endpoints can become "outdated" or how to upgrade one in place.
+- Recreating took 383 s (build+push 113 s, ready 270 s), but the new endpoint got a **new public
+  URL**, so every link already handed out (README, Devpost draft, GIF) broke. Ask: a stable
+  per-name URL, or an in-place upgrade path, plus an alert when an endpoint leaves RUNNING.

@@ -7,8 +7,13 @@ submission, re-check the numbers marked †.
 - **Track:** Coding
 - **Repo:** https://github.com/moiz-lakkadkutta/warden (MIT)
 - **Demo URL (live console, Nebius Serverless AI endpoint):**
-  https://port8080-cs9x5ndsvxz54x7.tunnel.applications.eu-west2.nebius.cloud/
+  https://port8080-h79fp774t88b2wc.tunnel.applications.eu-west2.nebius.cloud/
 - **Video:** _(link after upload; script in `docs/demo/script.md`)_
+- **Builders & Brews city:** Berlin (Sep 29). _Confirm attendance before submitting; the city
+  prize needs it disclosed on the form._
+- **New work:** Warden was written for this hackathon, starting 14 Sep 2026. Before that the
+  hunt → plan → fix → verify idea existed only as a personal Claude Code skill (prompts, no
+  shippable code); every line in this repo is new.
 - **Try it without credentials:**
   `uv tool install git+https://github.com/moiz-lakkadkutta/warden && warden run --demo`
 

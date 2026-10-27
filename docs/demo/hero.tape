@@ -56,6 +56,6 @@ Enter
 Sleep 4s
 Type "# the same console, live on a Nebius Serverless AI endpoint:"
 Enter
-Type "# https://port8080-cs9x5ndsvxz54x7.tunnel.applications.eu-west2.nebius.cloud/"
+Type "# https://port8080-h79fp774t88b2wc.tunnel.applications.eu-west2.nebius.cloud/"
 Enter
 Sleep 4s

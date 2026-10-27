@@ -167,9 +167,14 @@ Gate on main: ruff ✓ format ✓ mypy --strict ✓ **241 passed**. Token Factor
 
 ## E3 console on Nebius Serverless (2026-10-15)
 
-- **URL:** https://port8080-cs9x5ndsvxz54x7.tunnel.applications.eu-west2.nebius.cloud/
+- **URL:** https://port8080-h79fp774t88b2wc.tunnel.applications.eu-west2.nebius.cloud/
   (`/healthz` reports the image build sha).
-- **Endpoint** `warden-console` = `aiendpoint-e04v1xybmyd76zq065`, project
+- **2026-10-27:** the first endpoint `warden-console` (`aiendpoint-e04v1xybmyd76zq065`, URL
+  `port8080-cs9x5ndsvxz54x7…`) went to ERROR `VMStopped` ("the underlying virtual machine was stopped
+  or deleted unexpectedly"); `nebius ai endpoint restart` was refused with FailedPrecondition "This
+  Endpoint/Devlab is outdated. Please create a new one." Recreated as `warden-console-2` in 383 s;
+  the URL changed, so README, Devpost draft, video script and hero GIF were updated.
+- **Endpoint** `warden-console-2` = `aiendpoint-e04rb77w238j6c12fc` (was `warden-console`), project
   `project-e04w3bxjbc0029g2wvxk5h` (the CLI profile's project, shared with regwatch), eu-west2,
   `cpu-d3` `2vcpu-8gb`, 32 GiB disk, `--auth none`, no public IP (managed https tunnel URL).
   About $0.07/h while running (~$1.7/day). Stop billing: `ops/deploy-console.sh --down`.

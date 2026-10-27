@@ -65,7 +65,7 @@ The run on record is `20261015-163638-ce14` (`docs/status.md` §C5 replay table)
 
 **Capture:** the live console page for the run behind PR #221, scrolled from the header through
 the branch tree:
-`https://port8080-cs9x5ndsvxz54x7.tunnel.applications.eu-west2.nebius.cloud/20261010-123442-279b/`
+`https://port8080-h79fp774t88b2wc.tunnel.applications.eu-west2.nebius.cloud/20261010-123442-279b/`
 Then cut to `docs/spike-A7.png` (the repro failing on base with `10498.95 == 0`).
 
 **Narration:**
@@ -95,7 +95,7 @@ Optional cut: the campaign's PR `https://github.com/moiz-lakkadkutta/Fabric-Inve
 
 **Capture:** the console index on desktop, then the same URL at 390 px (Chrome DevTools device
 toolbar, iPhone 12 Pro):
-`https://port8080-cs9x5ndsvxz54x7.tunnel.applications.eu-west2.nebius.cloud/`
+`https://port8080-h79fp774t88b2wc.tunnel.applications.eu-west2.nebius.cloud/`
 
 **Narration:**
 > Every model call and sandbox step is logged with tokens, cost and time. The console renders that

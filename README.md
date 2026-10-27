@@ -14,9 +14,9 @@ warden console         # the run's timeline, branch tree and evidence table as o
 ```
 
 **Live console** on a Nebius Serverless AI endpoint:
-<https://port8080-cs9x5ndsvxz54x7.tunnel.applications.eu-west2.nebius.cloud/> · the run behind
+<https://port8080-h79fp774t88b2wc.tunnel.applications.eu-west2.nebius.cloud/> · the run behind
 draft PR #221, with its branch tree:
-<https://port8080-cs9x5ndsvxz54x7.tunnel.applications.eu-west2.nebius.cloud/20261010-123442-279b/>
+<https://port8080-h79fp774t88b2wc.tunnel.applications.eu-west2.nebius.cloud/20261010-123442-279b/>
 
 **Headline numbers** (real runs; details and sources below):
 
@@ -66,7 +66,7 @@ Lightning** parses. [Details ↓](#runs-on-nebius)
 | Token Factory (OpenAI-compatible) | every model call; JSON-schema structured output; function calling |
 | Token Factory **Sandboxes** | every issue is a fork of a base checkpoint (~1 s). The **theater check** forks the *unfixed* base and runs only the new tests (they must fail). The **regression check** runs the base's own tests on both forks. The gate runs on disposable forks, so the candidate is never modified |
 | Preloaded SWE-rebench images | `warden eval` plans, fixes and verifies on the task image, then grades with the hidden tests the agent never saw |
-| **Serverless AI endpoint** + Container Registry | the run console ([live](https://port8080-cs9x5ndsvxz54x7.tunnel.applications.eu-west2.nebius.cloud/)): `console/` is a read-only FastAPI app over the rendered runs (`/api/runs`, `/api/runs/<id>/events`), shipped as a non-root image to Nebius Container Registry and run on a `cpu-d3` endpoint by [`ops/deploy-console.sh`](ops/deploy-console.sh) |
+| **Serverless AI endpoint** + Container Registry | the run console ([live](https://port8080-h79fp774t88b2wc.tunnel.applications.eu-west2.nebius.cloud/)): `console/` is a read-only FastAPI app over the rendered runs (`/api/runs`, `/api/runs/<id>/events`), shipped as a non-root image to Nebius Container Registry and run on a `cpu-d3` endpoint by [`ops/deploy-console.sh`](ops/deploy-console.sh) |
 
 ## NVIDIA models
 
