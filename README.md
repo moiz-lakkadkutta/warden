@@ -32,6 +32,40 @@ every issue and run the theater check on the unfixed base · a Serverless AI end
 console · **Nemotron 3 Ultra** plans and judges, **Nemotron 3 Super** implements, **Nemotron 3.5
 Lightning** parses. [Details ↓](#runs-on-nebius)
 
+## Try it
+
+**In one minute, no keys or accounts:**
+
+1. Open the **live console** (Nebius Serverless AI endpoint): <https://port8080-h79fp774t88b2wc.tunnel.applications.eu-west2.nebius.cloud/>. The run behind draft PR
+   #221 shows its phase timeline, sandbox fork tree, per-call cost and evidence table:
+   <https://port8080-h79fp774t88b2wc.tunnel.applications.eu-west2.nebius.cloud/20261010-123442-279b/>
+2. Run the whole loop locally on a fake sandbox (needs [uv](https://docs.astral.sh/uv/)):
+
+   ```bash
+   uv tool install git+https://github.com/moiz-lakkadkutta/warden
+   warden doctor          # what's installed, what's missing and how to fix it (no network)
+   warden run --demo      # replays a recorded run: every phase, running cost, evidence table
+   warden console         # the same run as an HTML page
+   ```
+
+3. Read the real output: draft PR
+   [Fabric-Inventory#221](https://github.com/moiz-lakkadkutta/Fabric-Inventory/pull/221) (evidence
+   table, `PENDING-HUMAN` label, the target repo's CI 7/7 green) and the issues the Hunter filed,
+   [#225](https://github.com/moiz-lakkadkutta/Fabric-Inventory/issues/225) and
+   [#227](https://github.com/moiz-lakkadkutta/Fabric-Inventory/issues/227).
+
+**A live run on Nebius** needs a Token Factory key, a Nebius project id and **Sandboxes beta
+access** (`CONTREE_BASE_URL`); a Tavily key is optional. One SWE-rebench task, on Nebius's
+preloaded image, graded by hidden tests, spend capped at $1:
+
+```bash
+git clone https://github.com/moiz-lakkadkutta/warden && cd warden && uv sync --all-extras --dev
+cp .env.example .env          # fill NEBIUS_API_KEY, NEBIUS_PROJECT_ID (and TAVILY_API_KEY)
+uv run warden doctor --live
+uv run warden eval --n 1 --budget 1 --out runs/try -y
+uv run warden console         # open the page it writes
+```
+
 ## What it has done (real runs, not demos)
 
 - **[Fabric-Inventory#221](https://github.com/moiz-lakkadkutta/Fabric-Inventory/pull/221)**: a

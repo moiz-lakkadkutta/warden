@@ -65,12 +65,36 @@ Warden was written for this hackathon, starting 14 Sep 2026 (first commit that d
 
 ---
 
+## Testing instructions for judges (if the form has the field)
+
+```
+No keys or accounts needed:
+1. Live console (Nebius Serverless AI endpoint): https://port8080-h79fp774t88b2wc.tunnel.applications.eu-west2.nebius.cloud/
+   The run behind draft PR #221: https://port8080-h79fp774t88b2wc.tunnel.applications.eu-west2.nebius.cloud/20261010-123442-279b/
+2. Local, about a minute (needs uv):
+   uv tool install git+https://github.com/moiz-lakkadkutta/warden
+   warden doctor
+   warden run --demo
+   warden console
+3. Real output: https://github.com/moiz-lakkadkutta/Fabric-Inventory/pull/221 (evidence table, CI 7/7 green)
+
+Live run on Nebius (Token Factory key + Sandboxes beta access): README → "Try it", one SWE-rebench task capped at $1.
+```
+
+---
+
 ## About the project (the big Markdown story field)
 
 ```markdown
 ## Inspiration
 
 I run a small ERP (FastAPI + Postgres, double-entry ledger, Indian GST) on my own. A wrong number in a dashboard query or a missing tenant check reaches someone's books. Coding agents now write plausible fixes in minutes, so the bottleneck has moved from writing the fix to trusting it: a green test the agent wrote proves nothing if that test would have passed without the fix. I wanted an agent whose second half exists to doubt the first, and that shows its evidence instead of narrating confidence.
+
+## Try it (no keys needed)
+
+- **Live console** on a Nebius Serverless AI endpoint: https://port8080-h79fp774t88b2wc.tunnel.applications.eu-west2.nebius.cloud/ · the run behind draft PR #221, with its sandbox fork tree, per-call cost and evidence table: https://port8080-h79fp774t88b2wc.tunnel.applications.eu-west2.nebius.cloud/20261010-123442-279b/
+- **Run the loop locally** on a fake sandbox, in about a minute: `uv tool install git+https://github.com/moiz-lakkadkutta/warden`, then `warden run --demo` and `warden console`.
+- **A live run** (needs a Token Factory key and Sandboxes beta access): one SWE-rebench task with a $1 cap, `warden eval --n 1 --budget 1`. Steps are in the README under "Try it".
 
 Who it's for: small teams and solo maintainers of code where a wrong fix costs money (ERP, billing, invoicing, multi-tenant SaaS), who use coding agents but cannot afford to review every agent PR line by line. Warden does the doubting first and hands them a draft PR with its evidence, or nothing.
 

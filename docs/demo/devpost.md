@@ -32,6 +32,12 @@ green test the agent wrote proves nothing if that test would have passed without
 an agent whose second half exists to doubt the first, and that shows its evidence instead of
 narrating confidence.
 
+## Try it (no keys needed)
+
+- **Live console** on a Nebius Serverless AI endpoint: https://port8080-h79fp774t88b2wc.tunnel.applications.eu-west2.nebius.cloud/ · the run behind draft PR #221, with its sandbox fork tree, per-call cost and evidence table: https://port8080-h79fp774t88b2wc.tunnel.applications.eu-west2.nebius.cloud/20261010-123442-279b/
+- **Run the loop locally** on a fake sandbox, in about a minute: `uv tool install git+https://github.com/moiz-lakkadkutta/warden`, then `warden run --demo` and `warden console`.
+- **A live run** (needs a Token Factory key and Sandboxes beta access): one SWE-rebench task with a $1 cap, `warden eval --n 1 --budget 1`. Steps are in the README under "Try it".
+
 Who it's for: small teams and solo maintainers of code where a wrong fix costs money (ERP, billing, invoicing, multi-tenant SaaS), who use coding agents but cannot afford to review every agent PR line by line. Warden does the doubting first and hands them a draft PR with its evidence, or nothing.
 
 ## What makes Warden different
