@@ -22,7 +22,9 @@ table), `docs/status.md` §C5 (Hunter), §1 B6-live (PR #221), `evals/fabric/cam
 **Narration:**
 > A solo founder ships an ERP. One bug in a dashboard query counts draft invoices as revenue, and
 > the GST figure is wrong. Coding agents can write a fix for this in minutes. The hard part is
-> knowing whether to trust it. Warden is an agent whose second half exists to doubt the first.
+> knowing whether to trust it. Warden is an agent whose second half exists to doubt the first:
+> its new tests have to fail on the unfixed code, or they don't count. (Cut to the theater-check
+> frame, `docs/spike-A7.png`.)
 
 ## Shot 2 · 0:15–0:35 · Doctor and the offline demo
 
@@ -123,7 +125,7 @@ On screen: highlight `11 / 49` → `18 / 49`, `$0.49 / task`, `4 of 14 PASS (29%
 the README hero.
 
 **Narration:**
-> Nemotron 3 Ultra plans and judges. Nemotron 3 Super writes the code. Nemotron 3.5 Lightning
+> Nemotron 3 Ultra plans and judges, citing only docs that Tavily search returned. Nemotron 3 Super writes the code. Nemotron 3.5 Lightning
 > handles the small structured calls. All on Nebius Token Factory and Sandboxes. Warden: an agent
 > that has to prove its fix before it asks for your review.
 
