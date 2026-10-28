@@ -1,0 +1,25 @@
+# Pings the live console (Nebius Serverless AI endpoint) every 3 hours through judging.
+# A failed scheduled run makes GitHub email the repo owner. The first endpoint died silently
+# (VMStopped, 2026-10-27); recovery: `nebius ai endpoint get --id <id>`, else ops/deploy-console.sh.
+name: console-uptime
+on:
+  schedule:
+    - cron: "17 */3 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      U: https://port8080-h79fp774t88b2wc.tunnel.applications.eu-west2.nebius.cloud
+    steps:
+      - name: console index and the PR #221 run page answer 200
+        run: |
+          for p in / /20261010-123442-279b/index.html; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --retry 3 --retry-delay 20 --retry-all-errors --max-time 30 "$U$p")
+            echo "$code $U$p"
+            test "$code" = 200
+          done

@@ -39,6 +39,8 @@ Lightning** parses. [Details ↓](#runs-on-nebius)
 1. Open the **live console** (Nebius Serverless AI endpoint): <https://port8080-h79fp774t88b2wc.tunnel.applications.eu-west2.nebius.cloud/>. The run behind draft PR
    #221 shows its phase timeline, sandbox fork tree, per-call cost and evidence table:
    <https://port8080-h79fp774t88b2wc.tunnel.applications.eu-west2.nebius.cloud/20261010-123442-279b/>
+   If the endpoint is ever down, the same pages are mirrored on GitHub Pages:
+   <https://moiz-lakkadkutta.github.io/warden/>
 2. Run the whole loop locally on a fake sandbox (needs [uv](https://docs.astral.sh/uv/)):
 
    ```bash
